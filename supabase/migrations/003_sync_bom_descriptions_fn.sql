@@ -1,4 +1,5 @@
--- Run migration 002 first if not already done
+-- Idempotent — safe to run even if 002 was already applied
+
 alter table bom_mappings
   add column if not exists component_description  text,
   add column if not exists missing_from_inventory boolean not null default false;
@@ -6,12 +7,15 @@ alter table bom_mappings
 create table if not exists component_catalog (
   part_number      text primary key,
   description      text not null default '',
+  active           boolean not null default true,   -- false = not seen in latest import
+  last_seen_at     timestamptz not null default now(),
   last_updated_at  timestamptz not null default now()
 );
 
 -- ── sync_bom_descriptions() ───────────────────────────────────────────────────
--- Updates bom_mappings descriptions and missing flags from component_catalog.
--- Called after every Pastel inventory import. Runs server-side in one shot.
+-- Called after every Pastel import (from the app).
+-- 1. Updates bom_mappings descriptions from component_catalog.
+-- 2. Flags BOM components not in catalog as missing_from_inventory.
 
 create or replace function sync_bom_descriptions()
 returns jsonb language plpgsql as $$
@@ -19,7 +23,7 @@ declare
   updated_count int;
   missing_count int;
 begin
-  -- Set description + clear missing flag for components found in catalog
+  -- Update descriptions + clear missing flag for components found in catalog
   update bom_mappings bm
   set
     component_description  = cc.description,
@@ -32,7 +36,7 @@ begin
 
   get diagnostics updated_count = row_count;
 
-  -- Flag components not present in catalog
+  -- Flag BOM components not present in catalog at all
   update bom_mappings
   set
     missing_from_inventory = true,
@@ -43,7 +47,7 @@ begin
   get diagnostics missing_count = row_count;
 
   return jsonb_build_object(
-    'updated', updated_count,
+    'descriptions_updated', updated_count,
     'newly_missing', missing_count
   );
 end;

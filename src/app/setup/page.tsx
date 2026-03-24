@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
-import { Upload, FileSpreadsheet, Check, AlertTriangle, Loader, RefreshCw } from 'lucide-react';
+import { Upload, Check, AlertTriangle, Loader, RefreshCw, X } from 'lucide-react';
 import { buildReference } from '@/lib/constants';
-import { format, startOfToday, setHours } from 'date-fns';
+import { startOfToday, setHours } from 'date-fns';
 
 interface ImportedRow {
   partNumber: string;
@@ -22,7 +22,7 @@ interface ParseResult {
 export default function SetupPage() {
   const [year, setYear]       = useState(new Date().getFullYear());
   const [quarter, setQuarter] = useState(Math.ceil((new Date().getMonth() + 1) / 3));
-  const [countTime, setCountTime]   = useState('12:00');
+  const [countTime, setCountTime]     = useState('12:00');
   const [recountTime, setRecountTime] = useState('15:00');
 
   const [file001, setFile001] = useState<File | null>(null);
@@ -32,11 +32,12 @@ export default function SetupPage() {
   const [saving, setSaving]   = useState(false);
   const [saved, setSaved]     = useState(false);
   const [error, setError]     = useState<string | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
   const [alreadyExists, setAlreadyExists] = useState(false);
 
   const ref = buildReference(year, quarter);
 
-  // Check if this reference already exists whenever year/quarter changes
+  // Check if reference already exists when year/quarter changes
   useEffect(() => {
     setAlreadyExists(false);
     setSaved(false);
@@ -46,35 +47,49 @@ export default function SetupPage() {
       .catch(() => {});
   }, [ref]);
 
-  async function handlePreview() {
-    if (!file001 && !file002) return;
-    setParsing(true);
-    setError(null);
-    try {
-      const formData = new FormData();
-      if (file001) formData.append('file001', file001);
-      if (file002) formData.append('file002', file002);
-      const res = await fetch('/api/setup/parse-pastel', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Parse failed');
-      setPreview(data);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to parse files');
-    } finally {
-      setParsing(false);
+  // Auto-parse whenever files change
+  useEffect(() => {
+    if (!file001 && !file002) {
+      setPreview(null);
+      return;
     }
-  }
+    let cancelled = false;
+    setParsing(true);
+    setParseError(null);
+    setPreview(null);
 
-  async function handleCreate() {
+    const formData = new FormData();
+    if (file001) formData.append('file001', file001);
+    if (file002) formData.append('file002', file002);
+
+    fetch('/api/setup/parse-pastel', { method: 'POST', body: formData })
+      .then(r => r.json())
+      .then(data => {
+        if (cancelled) return;
+        if (data.error) throw new Error(data.error);
+        setPreview(data);
+      })
+      .catch(e => {
+        if (!cancelled) setParseError(e.message || 'Failed to parse files');
+      })
+      .finally(() => {
+        if (!cancelled) setParsing(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [file001, file002]);
+
+  async function handleSave() {
+    if (!preview) return;
     setSaving(true);
     setError(null);
     try {
       const today = startOfToday();
       const [ch, cm] = countTime.split(':').map(Number);
       const [rh, rm] = recountTime.split(':').map(Number);
-      const countingDeadline  = setHours(today, ch);
+      const countingDeadline = setHours(today, ch);
       countingDeadline.setMinutes(cm);
-      const recountDeadline   = setHours(today, rh);
+      const recountDeadline = setHours(today, rh);
       recountDeadline.setMinutes(rm);
 
       const res = await fetch('/api/stock-takes', {
@@ -91,28 +106,31 @@ export default function SetupPage() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create');
+      if (!res.ok) throw new Error(data.error || 'Failed to save');
       setSaved(true);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to create stock take');
+      setError(e instanceof Error ? e.message : 'Failed to save');
     } finally {
       setSaving(false);
     }
   }
+
+  const totalParts = (preview?.store001.length ?? 0) + (preview?.store002.length ?? 0);
+  const canSave = !!preview && totalParts > 0 && !parsing;
 
   return (
     <AppShell>
       <div className="p-8 max-w-3xl">
         <div className="mb-8">
           <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>
-            Setup New Stock Take
+            Setup Stock Take
           </h1>
           <p className="text-[var(--muted)] text-sm mt-1">
-            Import Pastel inventory quantities and configure the count session.
+            Import Pastel inventory quantities to initialise or refresh the stock take.
           </p>
         </div>
 
-        {/* Reference + timing */}
+        {/* Session details */}
         <div className="card p-6 mb-6">
           <h2 className="text-sm font-semibold mb-4">Session Details</h2>
           <div className="grid grid-cols-2 gap-4 mb-4">
@@ -135,6 +153,9 @@ export default function SetupPage() {
             <span className="font-semibold text-[var(--primary)] text-sm" style={{ fontFamily: 'var(--font-mono)' }}>
               {ref}
             </span>
+            {alreadyExists && (
+              <span className="badge badge-amber text-[10px]">exists — will update</span>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -149,87 +170,47 @@ export default function SetupPage() {
           </div>
         </div>
 
-        {/* File imports */}
+        {/* File upload */}
         <div className="card p-6 mb-6">
-          <h2 className="text-sm font-semibold mb-1">Import Pastel Quantities</h2>
+          <h2 className="text-sm font-semibold mb-1">Pastel Inventory Files</h2>
           <p className="text-xs text-[var(--muted)] mb-4">
-            Export stock quantities from Pastel for both stores and upload the files here.
+            Files are parsed automatically on selection. Both stores update the master component catalog.
           </p>
           <div className="grid grid-cols-2 gap-4">
-            <FileDropZone
-              label="Store 001 — Main"
-              file={file001}
-              onChange={setFile001}
-              accept=".csv,.xlsx,.xls"
-            />
-            <FileDropZone
-              label="Store 002 — Quarantine"
-              file={file002}
-              onChange={setFile002}
-              accept=".csv,.xlsx,.xls"
-            />
+            <FileDropZone label="Store 001 — Main"       file={file001} onChange={f => { setFile001(f); setSaved(false); }} />
+            <FileDropZone label="Store 002 — Quarantine" file={file002} onChange={f => { setFile002(f); setSaved(false); }} />
           </div>
 
-          {(file001 || file002) && !preview && (
-            <button
-              className="btn-secondary mt-4"
-              onClick={handlePreview}
-              disabled={parsing}
-            >
-              {parsing ? <Loader size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
-              {parsing ? 'Parsing…' : 'Preview Import'}
-            </button>
+          {/* Parse status */}
+          {parsing && (
+            <div className="mt-4 flex items-center gap-2 text-sm text-[var(--muted)]">
+              <Loader size={14} className="animate-spin" /> Parsing files…
+            </div>
+          )}
+
+          {parseError && (
+            <div className="mt-4 flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
+              <AlertTriangle size={14} /> {parseError}
+            </div>
+          )}
+
+          {preview && !parsing && (
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <ParsedStoreStat store="001" count={preview.store001.length} sample={preview.store001[0]} />
+              <ParsedStoreStat store="002" count={preview.store002.length} sample={preview.store002[0]} />
+              {preview.errors.length > 0 && (
+                <div className="col-span-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700 space-y-0.5">
+                  {preview.errors.map((e, i) => <div key={i}>⚠ {e}</div>)}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
-        {/* Preview */}
-        {preview && (
-          <div className="card p-6 mb-6">
-            <h2 className="text-sm font-semibold mb-3">Import Preview</h2>
-            {preview.errors.length > 0 && (
-              <div className="mb-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 space-y-1">
-                {preview.errors.map((e, i) => <div key={i}>⚠ {e}</div>)}
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="text-center p-4 rounded-lg bg-slate-50">
-                <div className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>
-                  {preview.store001.length}
-                </div>
-                <div className="text-xs text-[var(--muted)] mt-1">parts · Store 001</div>
-              </div>
-              <div className="text-center p-4 rounded-lg bg-slate-50">
-                <div className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>
-                  {preview.store002.length}
-                </div>
-                <div className="text-xs text-[var(--muted)] mt-1">parts · Store 002</div>
-              </div>
-            </div>
-
-            {/* Sample rows */}
-            {preview.store001.slice(0, 3).map((r, i) => (
-              <div key={i} className="mt-2 text-xs text-[var(--muted)] font-mono">
-                {r.partNumber} · {r.description} · qty {r.qty}
-              </div>
-            ))}
-            {preview.store001.length > 3 && (
-              <div className="text-xs text-[var(--muted)] mt-1">
-                +{preview.store001.length - 3} more…
-              </div>
-            )}
-          </div>
-        )}
-
+        {/* Save */}
         {error && (
           <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 flex items-center gap-2">
             <AlertTriangle size={14} /> {error}
-          </div>
-        )}
-
-        {alreadyExists && !saved && (
-          <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-700 flex items-center gap-2">
-            <RefreshCw size={14} />
-            <span><strong>{ref}</strong> already exists — uploading will replace its Pastel inventory data and refresh the BOM validation.</span>
           </div>
         )}
 
@@ -237,23 +218,21 @@ export default function SetupPage() {
           <div className="p-4 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700 flex items-center gap-2">
             <Check size={16} />
             {alreadyExists
-              ? <>Inventory for <strong>{ref}</strong> updated. BOM validation refreshed.</>
-              : <>Stock take <strong>{ref}</strong> created. Head to Checklist to continue.</>
+              ? <><strong>{ref}</strong> inventory updated — {totalParts} parts loaded, component catalog refreshed.</>
+              : <><strong>{ref}</strong> created — {totalParts} parts loaded. Head to Checklist next.</>
             }
           </div>
         ) : (
-          <button
-            className="btn-primary"
-            onClick={handleCreate}
-            disabled={saving || (!file001 && !file002)}
-          >
+          <button className="btn-primary" onClick={handleSave} disabled={!canSave || saving}>
             {saving
               ? <Loader size={14} className="animate-spin" />
               : alreadyExists ? <RefreshCw size={14} /> : <Check size={14} />
             }
             {saving
               ? (alreadyExists ? 'Updating…' : 'Creating…')
-              : alreadyExists ? `Update ${ref} Inventory` : `Create ${ref}`
+              : !preview || parsing
+                ? 'Waiting for files…'
+                : alreadyExists ? `Update ${ref} — ${totalParts} parts` : `Create ${ref} — ${totalParts} parts`
             }
           </button>
         )}
@@ -262,11 +241,31 @@ export default function SetupPage() {
   );
 }
 
-function FileDropZone({ label, file, onChange, accept }: {
+function ParsedStoreStat({ store, count, sample }: {
+  store: string;
+  count: number;
+  sample?: { partNumber: string; description: string; qty: number };
+}) {
+  return (
+    <div className="p-3 rounded-lg bg-slate-50 border border-[var(--card-border)]">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-medium text-[var(--muted)]">Store {store}</span>
+        <span className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)' }}>{count}</span>
+      </div>
+      <div className="text-[10px] text-[var(--muted)]">parts parsed</div>
+      {sample && (
+        <div className="text-[10px] font-mono text-[var(--muted-light)] mt-1 truncate">
+          {sample.partNumber} · {sample.description}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FileDropZone({ label, file, onChange }: {
   label: string;
   file: File | null;
   onChange: (f: File | null) => void;
-  accept: string;
 }) {
   return (
     <label className="block cursor-pointer">
@@ -274,25 +273,32 @@ function FileDropZone({ label, file, onChange, accept }: {
         file ? 'border-green-300 bg-green-50' : 'border-[var(--card-border)] hover:border-[var(--primary)] hover:bg-blue-50'
       }`}>
         {file ? (
-          <>
-            <Check size={20} className="mx-auto mb-2 text-green-600" />
-            <div className="text-xs font-medium text-green-700 truncate">{file.name}</div>
-            <div className="text-[10px] text-green-600 mt-0.5">{(file.size / 1024).toFixed(0)} KB</div>
-          </>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <Check size={16} className="text-green-600 flex-shrink-0" />
+              <div className="text-left min-w-0">
+                <div className="text-xs font-medium text-green-700 truncate">{file.name}</div>
+                <div className="text-[10px] text-green-600">{(file.size / 1024).toFixed(0)} KB</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={e => { e.preventDefault(); onChange(null); }}
+              className="text-green-400 hover:text-green-600 flex-shrink-0 ml-2"
+            >
+              <X size={14} />
+            </button>
+          </div>
         ) : (
           <>
             <Upload size={20} className="mx-auto mb-2 text-[var(--muted-light)]" />
             <div className="text-xs font-medium text-[var(--foreground)]">{label}</div>
-            <div className="text-[10px] text-[var(--muted)] mt-0.5">CSV or Excel</div>
+            <div className="text-[10px] text-[var(--muted)] mt-0.5">Click to select CSV or Excel</div>
           </>
         )}
       </div>
-      <input
-        type="file"
-        accept={accept}
-        className="sr-only"
-        onChange={e => onChange(e.target.files?.[0] ?? null)}
-      />
+      <input type="file" accept=".csv,.xlsx,.xls" className="sr-only"
+        onChange={e => onChange(e.target.files?.[0] ?? null)} />
     </label>
   );
 }

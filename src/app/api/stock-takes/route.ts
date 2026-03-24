@@ -113,11 +113,15 @@ async function syncComponentCatalog(
 
   if (descMap.size === 0) return;
 
-  // Upsert into component_catalog in batches
+  const now = new Date().toISOString();
+
+  // Upsert active parts into component_catalog
   const catalogRows = Array.from(descMap.entries()).map(([part_number, description]) => ({
     part_number,
     description,
-    last_updated_at: new Date().toISOString(),
+    active: true,
+    last_seen_at: now,
+    last_updated_at: now,
   }));
 
   const BATCH = 500;
@@ -129,6 +133,16 @@ async function syncComponentCatalog(
       console.error('[syncComponentCatalog] catalog upsert error:', error.message);
       return; // migration likely not run yet
     }
+  }
+
+  // Mark parts NOT in this import as inactive (removed from Pastel)
+  const activeCodes = Array.from(descMap.keys());
+  if (activeCodes.length > 0) {
+    await supabase
+      .from('component_catalog')
+      .update({ active: false })
+      .not('part_number', 'in', `(${activeCodes.map(c => `"${c}"`).join(',')})`)
+      .eq('active', true);
   }
 
   // Single RPC call updates all bom_mappings descriptions + missing flags server-side
