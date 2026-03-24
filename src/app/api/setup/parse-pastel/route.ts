@@ -6,6 +6,7 @@ interface ParsedRow {
   description: string;
   qty: number;
   store: '001' | '002';
+  unitCost: number | null;
 }
 
 interface ParseResult {
@@ -14,7 +15,22 @@ interface ParseResult {
   errors: string[];
 }
 
-function parseFile(buffer: Buffer, store: '001' | '002'): { rows: ParsedRow[]; errors: string[] } {
+/**
+ * Parse a Pastel "Inventory Valuation" export.
+ *
+ * Format (as exported by Pastel Evolution / Sage):
+ *   Row 0: Company name / title
+ *   Row 1: "On Hand" column header (multi-level)
+ *   Row 2: "Excluding" (continuation)
+ *   Row 3: "Code | Description | Store | Group | Unit | Unposted | Cost | Value"
+ *   Row 4+: Part data
+ *     Column 0 (key = company name string): Part code   e.g. XM400-01A01-02
+ *     __EMPTY  : Description
+ *     __EMPTY_1: Store number (1 or 2)
+ *     __EMPTY_4: Quantity on hand (excl. unposted)
+ *     __EMPTY_5: Unit cost
+ */
+function parsePastelFile(buffer: Buffer, store: '001' | '002'): { rows: ParsedRow[]; errors: string[] } {
   const errors: string[] = [];
   const rows: ParsedRow[] = [];
 
@@ -22,43 +38,41 @@ function parseFile(buffer: Buffer, store: '001' | '002'): { rows: ParsedRow[]; e
   try {
     workbook = XLSX.read(buffer, { type: 'buffer' });
   } catch {
-    return { rows: [], errors: [`Failed to parse file for Store ${store}`] };
+    return { rows: [], errors: [`Store ${store}: Failed to parse file`] };
   }
 
-  // Try each sheet until we find data
-  for (const sheetName of workbook.SheetNames) {
-    const sheet = workbook.Sheets[sheetName];
-    const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '', raw: false });
-    if (raw.length === 0) continue;
+  const sheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
 
-    for (const row of raw) {
-      // Find columns by name (flexible — will adjust after seeing real files)
-      const keys = Object.keys(row);
-      const partKey = keys.find(k =>
-        /item|part|code|stock/i.test(k)
-      );
-      const descKey = keys.find(k =>
-        /desc|description|name/i.test(k)
-      );
-      const qtyKey = keys.find(k =>
-        /qty|quantity|on.hand|balance|stock/i.test(k) && !/part|item|code/i.test(k)
-      );
+  // Use header:1 to get raw arrays (avoids column name collision)
+  const raw = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: '' });
 
-      if (!partKey) {
-        errors.push(`Store ${store}: Could not identify part number column in sheet "${sheetName}"`);
-        break;
-      }
+  if (raw.length < 5) {
+    return { rows: [], errors: [`Store ${store}: File too short — expected Pastel export format`] };
+  }
 
-      const partNumber = String(row[partKey] || '').trim();
-      if (!partNumber) continue;
+  // Data starts at row 4 (0-indexed) — skip title, headers, "On Hand/Excluding/Unposted" rows
+  // Columns (0-indexed): 0=PartCode, 1=Description, 2=Store, 3=Group, 4=Unit, 5=Qty, 6=UnitCost, 7=Value
+  for (let i = 4; i < raw.length; i++) {
+    const row = raw[i];
+    const partCode = String(row[0] || '').trim();
+    if (!partCode) continue;
 
-      const description = descKey ? String(row[descKey] || '').trim() : '';
-      const qty = qtyKey ? parseFloat(String(row[qtyKey]).replace(/[^0-9.-]/g, '')) || 0 : 0;
+    // Skip non-part rows (column headers, group headers, subtotals)
+    if (partCode.toLowerCase() === 'code') continue;
+    if (!partCode.match(/^[A-Z0-9]/)) continue;
+    if (partCode.toLowerCase().startsWith('total')) continue;
+    if (partCode.toLowerCase().startsWith('group')) continue;
 
-      rows.push({ partNumber, description, qty, store });
-    }
+    const description = String(row[1] || '').trim();
+    const qty = parseFloat(String(row[5] || '0').replace(/[^0-9.-]/g, '')) || 0;
+    const unitCost = parseFloat(String(row[6] || '').replace(/[^0-9.-]/g, '')) || null;
 
-    if (rows.length > 0) break; // Use first sheet with data
+    rows.push({ partNumber: partCode, description, qty, store, unitCost });
+  }
+
+  if (rows.length === 0) {
+    errors.push(`Store ${store}: No part data found — check file format`);
   }
 
   return { rows, errors };
@@ -73,14 +87,14 @@ export async function POST(request: NextRequest) {
 
   if (file001) {
     const buf = Buffer.from(await file001.arrayBuffer());
-    const { rows, errors } = parseFile(buf, '001');
+    const { rows, errors } = parsePastelFile(buf, '001');
     result.store001 = rows;
     result.errors.push(...errors);
   }
 
   if (file002) {
     const buf = Buffer.from(await file002.arrayBuffer());
-    const { rows, errors } = parseFile(buf, '002');
+    const { rows, errors } = parsePastelFile(buf, '002');
     result.store002 = rows;
     result.errors.push(...errors);
   }

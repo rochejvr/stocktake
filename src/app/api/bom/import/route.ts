@@ -2,6 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import * as XLSX from 'xlsx';
 
+/**
+ * Parse BOM Mapping Excel file.
+ *
+ * Format:
+ *   Sheet: "BOM Mapping"
+ *   Row 0: Store 001 inventory quantities   (__EMPTY = "Store 001", part cols = qty)
+ *   Row 1: Store 002 inventory quantities   (__EMPTY = "Store 002")
+ *   Row 2: Total inventory quantities       (__EMPTY = "Total")
+ *   Row 3: Column headers                   (__EMPTY_1 = "Store 001", _2 = "Store 002", _3 = "Total")
+ *   Row 4+: WIP entries
+ *     __EMPTY  = WIP code  (e.g. "WIP23000032")
+ *     __EMPTY_1 = Store 001 WIP count
+ *     __EMPTY_2 = Store 002 WIP count
+ *     __EMPTY_3 = Total WIP count
+ *     XM400-xxx = qty of that component per WIP unit
+ */
 export async function POST(request: NextRequest) {
   if (!supabase) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 });
 
@@ -10,47 +26,74 @@ export async function POST(request: NextRequest) {
   if (!file) return NextResponse.json({ error: 'No file' }, { status: 400 });
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const workbook = XLSX.read(buffer, { type: 'buffer' });
+  let workbook: XLSX.WorkBook;
+  try {
+    workbook = XLSX.read(buffer, { type: 'buffer' });
+  } catch {
+    return NextResponse.json({ error: 'Failed to parse Excel file' }, { status: 400 });
+  }
 
-  const mappings: { wip_code: string; component_code: string; qty_per_wip: number; notes: string | null }[] = [];
+  // Find the BOM sheet
+  const sheetName = workbook.SheetNames.find(s =>
+    s.toLowerCase().includes('bom') || s.toLowerCase().includes('mapping')
+  ) ?? workbook.SheetNames[0];
+
+  const sheet = workbook.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet, { defval: '', raw: false });
+
+  const SKIP_LABELS = ['store 001', 'store 002', 'total', ''];
+
+  const mappings: { wip_code: string; component_code: string; qty_per_wip: number }[] = [];
   const errors: string[] = [];
+  let wipRowCount = 0;
 
-  // Look for a sheet with BOM/WIP data
-  // Expected columns: WIP Code | Component Code | Qty | Notes (flexible)
-  for (const sheetName of workbook.SheetNames) {
-    const sheet = workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+  for (const row of rows) {
+    const wipCode = String(row['__EMPTY'] || '').trim();
 
-    for (const row of rows) {
-      const keys = Object.keys(row).map(k => k.toLowerCase().trim());
-      const wipKey  = Object.keys(row).find(k => k.toLowerCase().includes('wip'));
-      const compKey = Object.keys(row).find(k => k.toLowerCase().includes('component') || k.toLowerCase().includes('part'));
-      const qtyKey  = Object.keys(row).find(k => k.toLowerCase().includes('qty') || k.toLowerCase().includes('quantity'));
-      const notesKey = Object.keys(row).find(k => k.toLowerCase().includes('note'));
+    // Skip header rows and non-WIP rows
+    if (SKIP_LABELS.includes(wipCode.toLowerCase())) continue;
+    if (!wipCode) continue;
 
-      if (!wipKey || !compKey) continue;
+    // Only process WIP rows (start with WIP or similar)
+    // Comment out this guard if you want to import non-WIP BOMs too
+    wipRowCount++;
 
-      const wipCode  = String(row[wipKey]).trim();
-      const compCode = String(row[compKey]).trim();
-      const qty      = qtyKey ? parseFloat(String(row[qtyKey])) || 1 : 1;
-      const notes    = notesKey ? String(row[notesKey]).trim() || null : null;
+    // All remaining keys (not __EMPTY, __EMPTY_1, __EMPTY_2, __EMPTY_3) are component codes
+    const componentKeys = Object.keys(row).filter(k => !k.startsWith('__EMPTY'));
 
-      if (!wipCode || !compCode || wipCode === '' || compCode === '') continue;
+    for (const componentCode of componentKeys) {
+      const qty = parseFloat(String(row[componentCode]).replace(/[^0-9.-]/g, ''));
+      if (!qty || qty <= 0) continue;
 
-      mappings.push({ wip_code: wipCode, component_code: compCode, qty_per_wip: qty, notes });
+      mappings.push({
+        wip_code: wipCode,
+        component_code: componentCode,
+        qty_per_wip: qty,
+      });
     }
   }
 
   if (mappings.length === 0) {
-    return NextResponse.json({ error: 'No valid BOM rows found. Expected columns: WIP Code, Component Code, Qty.' }, { status: 400 });
+    return NextResponse.json({
+      error: `No BOM data found. Processed ${wipRowCount} WIP rows but found no non-zero component quantities.`,
+    }, { status: 400 });
   }
 
-  // Upsert mappings
-  const { error } = await supabase
-    .from('bom_mappings')
-    .upsert(mappings, { onConflict: 'wip_code,component_code', ignoreDuplicates: false });
+  // Upsert mappings in batches (Supabase has row limits)
+  const BATCH = 500;
+  for (let i = 0; i < mappings.length; i += BATCH) {
+    const batch = mappings.slice(i, i + BATCH);
+    const { error } = await supabase
+      .from('bom_mappings')
+      .upsert(batch, { onConflict: 'wip_code,component_code', ignoreDuplicates: false });
+    if (error) {
+      errors.push(`Batch ${i / BATCH + 1}: ${error.message}`);
+    }
+  }
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-
-  return NextResponse.json({ imported: mappings.length, errors });
+  return NextResponse.json({
+    imported: mappings.length,
+    wipCodes: wipRowCount,
+    errors,
+  });
 }
