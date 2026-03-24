@@ -71,10 +71,12 @@ export interface PastelInventory {
 
 export interface BomMapping {
   id: string;
-  wip_code: string;               // e.g. WIP230002
-  component_code: string;         // e.g. XM400-01B01-02
+  wip_code: string;                    // e.g. WIP230002
+  component_code: string;              // e.g. XM400-01B01-02
   qty_per_wip: number;
   notes: string | null;
+  component_description: string | null; // from component_catalog
+  missing_from_inventory: boolean;      // true if not found in last Pastel import
   created_at: string;
   updated_at: string;
 }

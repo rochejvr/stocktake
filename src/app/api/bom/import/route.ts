@@ -79,21 +79,46 @@ export async function POST(request: NextRequest) {
     }, { status: 400 });
   }
 
-  // Upsert mappings in batches (Supabase has row limits)
+  // Upsert mappings in batches
   const BATCH = 500;
   for (let i = 0; i < mappings.length; i += BATCH) {
     const batch = mappings.slice(i, i + BATCH);
     const { error } = await supabase
       .from('bom_mappings')
       .upsert(batch, { onConflict: 'wip_code,component_code', ignoreDuplicates: false });
-    if (error) {
-      errors.push(`Batch ${i / BATCH + 1}: ${error.message}`);
-    }
+    if (error) errors.push(`Batch ${i / BATCH + 1}: ${error.message}`);
   }
+
+  // Backfill descriptions + missing flags from component_catalog
+  const uniqueComponents = [...new Set(mappings.map(m => m.component_code))];
+  const { data: catalog } = await supabase
+    .from('component_catalog')
+    .select('part_number, description')
+    .in('part_number', uniqueComponents);
+
+  const descMap = new Map((catalog || []).map(c => [c.part_number, c.description]));
+
+  // Fetch all affected bom_mapping rows to update them
+  const { data: bomRows } = await supabase
+    .from('bom_mappings')
+    .select('id, component_code')
+    .in('component_code', uniqueComponents);
+
+  for (const row of bomRows || []) {
+    const desc = descMap.get(row.component_code) ?? null;
+    const missing = !descMap.has(row.component_code);
+    await supabase
+      .from('bom_mappings')
+      .update({ component_description: desc, missing_from_inventory: missing })
+      .eq('id', row.id);
+  }
+
+  const missingCount = uniqueComponents.filter(c => !descMap.has(c)).length;
 
   return NextResponse.json({
     imported: mappings.length,
     wipCodes: wipRowCount,
+    missingFromInventory: missingCount,
     errors,
   });
 }

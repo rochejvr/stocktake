@@ -26,9 +26,13 @@ export async function POST(request: NextRequest) {
     part_number: r.partNumber, description: r.description, pastel_qty: r.qty,
   }));
 
-  if (rows001.length + rows002.length > 0) {
-    await supabase.from('pastel_inventory').insert([...rows001, ...rows002]);
+  const allInventoryRows = [...rows001, ...rows002];
+  if (allInventoryRows.length > 0) {
+    await supabase.from('pastel_inventory').insert(allInventoryRows);
   }
+
+  // Upsert component catalog + validate BOM mapping
+  await syncComponentCatalog(inventory?.store001 || [], inventory?.store002 || []);
 
   // Seed checklist items
   await seedChecklist(st.id);
@@ -72,4 +76,73 @@ async function seedChecklist(stockTakeId: string) {
   await supabase.from('checklist_items').insert(
     items.map(i => ({ ...i, stock_take_id: stockTakeId }))
   );
+}
+
+/**
+ * Upsert component descriptions into the permanent catalog,
+ * then cross-check bom_mappings — flag any component not in the inventory.
+ * Also updates bom_mappings.component_description if changed.
+ */
+async function syncComponentCatalog(
+  store001: { partNumber: string; description: string }[],
+  store002: { partNumber: string; description: string }[],
+) {
+  if (!supabase) return;
+
+  // Build a map of partNumber → description from inventory (prefer 001 over 002)
+  const descMap = new Map<string, string>();
+  for (const r of [...store002, ...store001]) {
+    if (r.partNumber && r.description) descMap.set(r.partNumber, r.description);
+  }
+
+  if (descMap.size === 0) return;
+
+  // Upsert into component_catalog
+  const catalogRows = Array.from(descMap.entries()).map(([part_number, description]) => ({
+    part_number,
+    description,
+    last_updated_at: new Date().toISOString(),
+  }));
+
+  const BATCH = 500;
+  for (let i = 0; i < catalogRows.length; i += BATCH) {
+    await supabase
+      .from('component_catalog')
+      .upsert(catalogRows.slice(i, i + BATCH), { onConflict: 'part_number' });
+  }
+
+  // Fetch all bom_mappings component codes
+  const { data: bomRows } = await supabase
+    .from('bom_mappings')
+    .select('id, component_code, component_description');
+
+  if (!bomRows?.length) return;
+
+  // For each mapping: update description if changed, flag if missing from inventory
+  const updates: { id: string; component_description: string | null; missing_from_inventory: boolean }[] = [];
+
+  for (const row of bomRows) {
+    const catalogDesc = descMap.get(row.component_code) ?? null;
+    const isMissing = !descMap.has(row.component_code);
+    const descChanged = catalogDesc !== row.component_description;
+
+    if (descChanged || isMissing !== false) {
+      updates.push({
+        id: row.id,
+        component_description: catalogDesc,
+        missing_from_inventory: isMissing,
+      });
+    }
+  }
+
+  // Batch update
+  for (const u of updates) {
+    await supabase
+      .from('bom_mappings')
+      .update({
+        component_description: u.component_description,
+        missing_from_inventory: u.missing_from_inventory,
+      })
+      .eq('id', u.id);
+  }
 }
