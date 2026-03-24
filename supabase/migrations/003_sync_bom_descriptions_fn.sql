@@ -12,6 +12,11 @@ create table if not exists component_catalog (
   last_updated_at  timestamptz not null default now()
 );
 
+-- If table was created by migration 002 without these columns, add them
+alter table component_catalog
+  add column if not exists active boolean not null default true,
+  add column if not exists last_seen_at timestamptz not null default now();
+
 -- ── sync_bom_descriptions() ───────────────────────────────────────────────────
 -- Called after every Pastel import (from the app).
 -- 1. Updates bom_mappings descriptions from component_catalog.
