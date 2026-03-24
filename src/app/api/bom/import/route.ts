@@ -89,31 +89,17 @@ export async function POST(request: NextRequest) {
     if (error) errors.push(`Batch ${i / BATCH + 1}: ${error.message}`);
   }
 
-  // Backfill descriptions + missing flags from component_catalog
-  const uniqueComponents = [...new Set(mappings.map(m => m.component_code))];
-  const { data: catalog } = await supabase
-    .from('component_catalog')
-    .select('part_number, description')
-    .in('part_number', uniqueComponents);
-
-  const descMap = new Map((catalog || []).map(c => [c.part_number, c.description]));
-
-  // Fetch all affected bom_mapping rows to update them
-  const { data: bomRows } = await supabase
-    .from('bom_mappings')
-    .select('id, component_code')
-    .in('component_code', uniqueComponents);
-
-  for (const row of bomRows || []) {
-    const desc = descMap.get(row.component_code) ?? null;
-    const missing = !descMap.has(row.component_code);
-    await supabase
-      .from('bom_mappings')
-      .update({ component_description: desc, missing_from_inventory: missing })
-      .eq('id', row.id);
+  // Sync descriptions + missing flags via single RPC (requires migration 003)
+  const { error: rpcErr } = await supabase.rpc('sync_bom_descriptions');
+  if (rpcErr) {
+    console.error('[BOM Import] sync_bom_descriptions RPC error:', rpcErr.message);
   }
 
-  const missingCount = uniqueComponents.filter(c => !descMap.has(c)).length;
+  // Count missing for response info (quick aggregate query)
+  const { count: missingCount } = await supabase
+    .from('bom_mappings')
+    .select('*', { count: 'exact', head: true })
+    .eq('missing_from_inventory', true);
 
   return NextResponse.json({
     imported: mappings.length,
