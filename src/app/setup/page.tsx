@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
-import { Upload, FileSpreadsheet, Check, AlertTriangle, Loader } from 'lucide-react';
+import { Upload, FileSpreadsheet, Check, AlertTriangle, Loader, RefreshCw } from 'lucide-react';
 import { buildReference } from '@/lib/constants';
-import { format, addHours, startOfToday, setHours } from 'date-fns';
+import { format, startOfToday, setHours } from 'date-fns';
 
 interface ImportedRow {
   partNumber: string;
@@ -32,8 +32,19 @@ export default function SetupPage() {
   const [saving, setSaving]   = useState(false);
   const [saved, setSaved]     = useState(false);
   const [error, setError]     = useState<string | null>(null);
+  const [alreadyExists, setAlreadyExists] = useState(false);
 
   const ref = buildReference(year, quarter);
+
+  // Check if this reference already exists whenever year/quarter changes
+  useEffect(() => {
+    setAlreadyExists(false);
+    setSaved(false);
+    fetch(`/api/stock-takes/check?reference=${encodeURIComponent(ref)}`)
+      .then(r => r.json())
+      .then(d => setAlreadyExists(!!d.exists))
+      .catch(() => {});
+  }, [ref]);
 
   async function handlePreview() {
     if (!file001 && !file002) return;
@@ -215,9 +226,20 @@ export default function SetupPage() {
           </div>
         )}
 
+        {alreadyExists && !saved && (
+          <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-700 flex items-center gap-2">
+            <RefreshCw size={14} />
+            <span><strong>{ref}</strong> already exists — uploading will replace its Pastel inventory data and refresh the BOM validation.</span>
+          </div>
+        )}
+
         {saved ? (
           <div className="p-4 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700 flex items-center gap-2">
-            <Check size={16} /> Stock take <strong>{ref}</strong> created. Head to Checklist to continue.
+            <Check size={16} />
+            {alreadyExists
+              ? <>Inventory for <strong>{ref}</strong> updated. BOM validation refreshed.</>
+              : <>Stock take <strong>{ref}</strong> created. Head to Checklist to continue.</>
+            }
           </div>
         ) : (
           <button
@@ -225,8 +247,14 @@ export default function SetupPage() {
             onClick={handleCreate}
             disabled={saving || (!file001 && !file002)}
           >
-            {saving ? <Loader size={14} className="animate-spin" /> : <Check size={14} />}
-            {saving ? 'Creating…' : `Create ${ref}`}
+            {saving
+              ? <Loader size={14} className="animate-spin" />
+              : alreadyExists ? <RefreshCw size={14} /> : <Check size={14} />
+            }
+            {saving
+              ? (alreadyExists ? 'Updating…' : 'Creating…')
+              : alreadyExists ? `Update ${ref} Inventory` : `Create ${ref}`
+            }
           </button>
         )}
       </div>

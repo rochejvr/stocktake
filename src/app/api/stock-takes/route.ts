@@ -7,14 +7,31 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { reference, name, quarter, year, counting_deadline, recount_deadline, inventory } = body;
 
-  // Create stock take
-  const { data: st, error: stErr } = await supabase
+  // Check if this reference already exists
+  const { data: existing } = await supabase
     .from('stock_takes')
-    .insert({ reference, name, quarter, year, counting_deadline, recount_deadline, created_by: 'admin', status: 'setup' })
-    .select()
-    .single();
+    .select('id, status')
+    .eq('reference', reference)
+    .maybeSingle();
 
-  if (stErr) return NextResponse.json({ error: stErr.message }, { status: 400 });
+  let st: { id: string; status: string };
+  let isUpdate = false;
+
+  if (existing) {
+    // Re-import: replace inventory data for this stock take
+    st = existing;
+    isUpdate = true;
+    await supabase.from('pastel_inventory').delete().eq('stock_take_id', st.id);
+  } else {
+    // Create new stock take
+    const { data: created, error: stErr } = await supabase
+      .from('stock_takes')
+      .insert({ reference, name, quarter, year, counting_deadline, recount_deadline, created_by: 'admin', status: 'setup' })
+      .select()
+      .single();
+    if (stErr) return NextResponse.json({ error: stErr.message }, { status: 400 });
+    st = created;
+  }
 
   // Insert pastel inventory
   const rows001 = (inventory?.store001 || []).map((r: { partNumber: string; description: string; qty: number }) => ({
@@ -34,10 +51,10 @@ export async function POST(request: NextRequest) {
   // Upsert component catalog + validate BOM mapping
   await syncComponentCatalog(inventory?.store001 || [], inventory?.store002 || []);
 
-  // Seed checklist items
-  await seedChecklist(st.id);
+  // Seed checklist only for new stock takes
+  if (!isUpdate) await seedChecklist(st.id);
 
-  return NextResponse.json({ stockTake: st });
+  return NextResponse.json({ stockTake: st, updated: isUpdate });
 }
 
 export async function GET() {
