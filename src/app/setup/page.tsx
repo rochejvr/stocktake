@@ -115,8 +115,10 @@ export default function SetupPage() {
     }
   }
 
-  const totalParts = (preview?.store001.length ?? 0) + (preview?.store002.length ?? 0);
-  const canSave = !!preview && totalParts > 0 && !parsing;
+  const uniqueParts = preview
+    ? new Set([...preview.store001.map(r => r.partNumber), ...preview.store002.map(r => r.partNumber)]).size
+    : 0;
+  const canSave = !!preview && uniqueParts > 0 && !parsing;
 
   return (
     <AppShell>
@@ -218,8 +220,8 @@ export default function SetupPage() {
           <div className="p-4 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700 flex items-center gap-2">
             <Check size={16} />
             {alreadyExists
-              ? <><strong>{ref}</strong> inventory updated — {totalParts} parts loaded, component catalog refreshed.</>
-              : <><strong>{ref}</strong> created — {totalParts} parts loaded. Head to Checklist next.</>
+              ? <><strong>{ref}</strong> inventory updated — {uniqueParts} parts loaded, component catalog refreshed.</>
+              : <><strong>{ref}</strong> created — {uniqueParts} parts loaded. Head to Checklist next.</>
             }
           </div>
         ) : (
@@ -232,7 +234,7 @@ export default function SetupPage() {
               ? (alreadyExists ? 'Updating…' : 'Creating…')
               : !preview || parsing
                 ? 'Waiting for files…'
-                : alreadyExists ? `Update ${ref} — ${totalParts} parts` : `Create ${ref} — ${totalParts} parts`
+                : alreadyExists ? `Update ${ref} — ${uniqueParts} parts` : `Create ${ref} — ${uniqueParts} parts`
             }
           </button>
         )}
