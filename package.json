@@ -3,18 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3005 --turbopack",
+    "dev": "next dev --port 3004 --webpack",
     "build": "next build",
-    "start": "next start --port 3005",
+    "start": "next start --port 3004",
     "lint": "next lint"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.3",
     "date-fns": "^4.1.0",
+    "html5-qrcode": "^2.3.8",
     "lucide-react": "^0.477.0",
     "next": "16.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-qr-code": "^2.0.18",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

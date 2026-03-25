@@ -14,12 +14,13 @@ export async function GET() {
 
   if (!stockTake) return NextResponse.json({ stockTake: null, stats: null });
 
-  // Compute stats
-  const [{ count: totalParts }, { data: sessions }, { data: flagged }] = await Promise.all([
-    supabase.from('pastel_inventory').select('*', { count: 'exact', head: true }).eq('stock_take_id', stockTake.id),
+  // Compute stats — count unique parts (not per-store duplicates)
+  const [{ data: distinctParts }, { data: sessions }, { data: flagged }] = await Promise.all([
+    supabase.from('pastel_inventory').select('part_number').eq('stock_take_id', stockTake.id),
     supabase.from('scan_sessions').select('id, submitted_at').eq('stock_take_id', stockTake.id),
     supabase.from('count_results').select('id').eq('stock_take_id', stockTake.id).eq('recount_flagged', true),
   ]);
+  const totalParts = new Set((distinctParts || []).map(r => r.part_number)).size;
 
   const { count: countedParts } = await supabase
     .from('scan_records')
@@ -27,7 +28,7 @@ export async function GET() {
     .eq('stock_take_id', stockTake.id);
 
   const stats = {
-    totalParts: totalParts ?? 0,
+    totalParts,
     countedParts: countedParts ?? 0,
     activeSessions: sessions?.filter(s => !s.submitted_at).length ?? 0,
     submittedSessions: sessions?.filter(s => s.submitted_at).length ?? 0,

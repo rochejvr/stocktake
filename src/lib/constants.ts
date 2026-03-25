@@ -8,6 +8,21 @@ export const RECOUNT_THRESHOLDS: Record<'A' | 'B' | 'C', number> = {
 // Absolute ZAR value threshold for recount (regardless of %)
 export const RECOUNT_ZAR_THRESHOLD = 500;
 
+// Tier assignment by unit cost (ZAR)
+// A = high value, B = mid value, C = low value
+export const TIER_COST_THRESHOLDS = {
+  A: 500,   // unit cost >= R500
+  B: 50,    // unit cost >= R50
+  // Everything else = C
+};
+
+export function assignTier(unitCost: number | null): 'A' | 'B' | 'C' {
+  if (unitCost == null || unitCost <= 0) return 'C';
+  if (unitCost >= TIER_COST_THRESHOLDS.A) return 'A';
+  if (unitCost >= TIER_COST_THRESHOLDS.B) return 'B';
+  return 'C';
+}
+
 // Round number detection — variances that are exact multiples of these
 export const ROUND_NUMBER_MULTIPLES = [50, 100, 200, 500, 1000];
 

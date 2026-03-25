@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { assignTier } from '@/lib/constants';
 
 export async function POST(request: NextRequest) {
   if (!supabase) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 });
@@ -34,13 +35,17 @@ export async function POST(request: NextRequest) {
   }
 
   // Insert pastel inventory
-  const rows001 = (inventory?.store001 || []).map((r: { partNumber: string; description: string; qty: number }) => ({
+  const rows001 = (inventory?.store001 || []).map((r: { partNumber: string; description: string; qty: number; unitCost?: number | null }) => ({
     stock_take_id: st.id, store_code: '001',
     part_number: r.partNumber, description: r.description, pastel_qty: r.qty,
+    unit_cost: r.unitCost ?? null,
+    tier: assignTier(r.unitCost ?? null),
   }));
-  const rows002 = (inventory?.store002 || []).map((r: { partNumber: string; description: string; qty: number }) => ({
+  const rows002 = (inventory?.store002 || []).map((r: { partNumber: string; description: string; qty: number; unitCost?: number | null }) => ({
     stock_take_id: st.id, store_code: '002',
     part_number: r.partNumber, description: r.description, pastel_qty: r.qty,
+    unit_cost: r.unitCost ?? null,
+    tier: assignTier(r.unitCost ?? null),
   }));
 
   const allInventoryRows = [...rows001, ...rows002];
@@ -51,8 +56,10 @@ export async function POST(request: NextRequest) {
   // Upsert component catalog + validate BOM mapping
   await syncComponentCatalog(inventory?.store001 || [], inventory?.store002 || []);
 
-  // Seed checklist only for new stock takes
-  if (!isUpdate) await seedChecklist(st.id);
+  // Seed checklist only for new stock takes (uses DB function from migration 004)
+  if (!isUpdate) {
+    await supabase.rpc('seed_checklist_items', { p_stock_take_id: st.id });
+  }
 
   return NextResponse.json({ stockTake: st, updated: isUpdate });
 }
@@ -61,38 +68,6 @@ export async function GET() {
   if (!supabase) return NextResponse.json([]);
   const { data } = await supabase.from('stock_takes').select('*').order('created_at', { ascending: false });
   return NextResponse.json(data || []);
-}
-
-async function seedChecklist(stockTakeId: string) {
-  if (!supabase) return;
-  const items = [
-    // 48h before
-    { phase: '48h', sort_order: 1,  item_text: 'All outstanding GRNs posted to Pastel' },
-    { phase: '48h', sort_order: 2,  item_text: 'All goods issues and picking slips posted' },
-    { phase: '48h', sort_order: 3,  item_text: 'All WIP job cards updated with materials issued' },
-    { phase: '48h', sort_order: 4,  item_text: 'All completed production batches received into finished goods' },
-    { phase: '48h', sort_order: 5,  item_text: 'All customer shipments and delivery notes posted' },
-    { phase: '48h', sort_order: 6,  item_text: 'All rejected/scrap quantities written off and moved to quarantine' },
-    { phase: '48h', sort_order: 7,  item_text: 'Incoming goods during count window identified and held separately' },
-    { phase: '48h', sort_order: 8,  item_text: 'Count teams assigned to zones — no overlaps' },
-    // 24h before
-    { phase: '24h', sort_order: 1,  item_text: 'All stock returned to correct bins — no stock on benches or production floor' },
-    { phase: '24h', sort_order: 2,  item_text: 'All WIP gathered to staging area with job cards attached' },
-    { phase: '24h', sort_order: 3,  item_text: 'Quarantine area (Store 002) physically segregated and labeled' },
-    { phase: '24h', sort_order: 4,  item_text: 'All bins correctly labeled with part numbers and bin codes' },
-    { phase: '24h', sort_order: 5,  item_text: 'BOM mapping reviewed and verified against physical WIP bins' },
-    { phase: '24h', sort_order: 6,  item_text: 'Mobile devices charged and barcode scanning tested' },
-    { phase: '24h', sort_order: 7,  item_text: 'All counting personnel briefed on process' },
-    // Day of
-    { phase: 'day_of', sort_order: 1, item_text: 'Supervisor walkthrough complete — no unposted overnight movements' },
-    { phase: 'day_of', sort_order: 2, item_text: 'All personnel confirmed and zones assigned' },
-    { phase: 'day_of', sort_order: 3, item_text: 'Production frozen — no material movements during count window' },
-    { phase: 'day_of', sort_order: 4, item_text: 'Clock started and count deadline confirmed with team' },
-  ];
-
-  await supabase.from('checklist_items').insert(
-    items.map(i => ({ ...i, stock_take_id: stockTakeId }))
-  );
 }
 
 /**

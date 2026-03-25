@@ -1,3 +1,38 @@
+// ── Users & Auth ─────────────────────────────────────────────────────────────
+
+export type UserRole = 'admin' | 'finance' | 'production' | 'procurement' | 'readonly';
+
+export type Department = 'Finance' | 'Production' | 'Procurement';
+
+export const DEPARTMENTS: Department[] = ['Finance', 'Production', 'Procurement'];
+
+export interface User {
+  id: string;
+  email: string;
+  fullName: string;
+  role: UserRole;
+  department?: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Map user department/role to the checklist Department */
+export function getUserDepartment(user: User): Department | null {
+  if (user.role === 'admin') return null; // admin can act on all
+  const dept = (user.department || user.role).toLowerCase();
+  if (dept.includes('finance')) return 'Finance';
+  if (dept.includes('production')) return 'Production';
+  if (dept.includes('procurement')) return 'Procurement';
+  return null;
+}
+
+/** Check if user can act on a given department's items */
+export function canActOnDepartment(user: User, department: Department): boolean {
+  if (user.role === 'admin') return true;
+  return getUserDepartment(user) === department;
+}
+
 // ── Stock Take ────────────────────────────────────────────────────────────────
 
 export type StockTakeStatus =
@@ -12,11 +47,11 @@ export interface StockTake {
   id: string;
   reference: string;           // ST-2026-Q1
   name: string;                // "Q1 2026 Stock Take"
-  quarter: number;             // 1–4
+  quarter: number;             // 1-4
   year: number;
   status: StockTakeStatus;
-  counting_deadline: string;   // ISO datetime — target 12:00
-  recount_deadline: string;    // ISO datetime — target 15:00
+  counting_deadline: string;   // ISO datetime -- target 12:00
+  recount_deadline: string;    // ISO datetime -- target 15:00
   frozen_at: string | null;
   frozen_by: string | null;
   started_at: string | null;
@@ -25,32 +60,54 @@ export interface StockTake {
   created_at: string;
 }
 
-// ── Users ─────────────────────────────────────────────────────────────────────
-
-export type UserRole = 'admin' | 'supervisor' | 'counter';
-
-export interface StockTakeUser {
-  id: string;
-  name: string;
-  role: UserRole;
-  pin_hash: string;
-  active: boolean;
-  created_at: string;
-}
-
 // ── Checklist ─────────────────────────────────────────────────────────────────
 
-export type ChecklistPhase = '48h' | '24h' | 'day_of';
+export type ChecklistPhase = 'pre' | 'during' | 'post';
+
+export const PHASE_LABELS: Record<ChecklistPhase, string> = {
+  pre: 'Pre-Stock Take',
+  during: 'Stock Take',
+  post: 'Post-Stock Take',
+};
 
 export interface ChecklistItem {
   id: string;
   stock_take_id: string;
   phase: ChecklistPhase;
+  department: Department;
   sort_order: number;
   item_text: string;
   completed_by: string | null;    // user name
   completed_at: string | null;
   notes: string | null;
+}
+
+export type ObservationStatus = 'open' | 'in_progress' | 'closed';
+
+export interface ChecklistObservation {
+  id: string;
+  stock_take_id: string;
+  checklist_item_id: string | null; // null = general observation
+  phase: ChecklistPhase;
+  department: Department;
+  issue_description: string;
+  corrective_action: string | null;
+  preventive_action: string | null;
+  status: ObservationStatus;
+  reported_by: string;
+  reported_at: string;
+  closed_by: string | null;
+  closed_at: string | null;
+}
+
+export interface ChecklistSignoff {
+  id: string;
+  stock_take_id: string;
+  phase: ChecklistPhase;
+  department: Department;
+  signed_by: string;     // user name
+  signed_by_id: string;  // user id
+  signed_at: string;
 }
 
 // ── Pastel Inventory ──────────────────────────────────────────────────────────
@@ -87,6 +144,18 @@ export interface ComponentChain {
   scanned_code: string;           // e.g. XM400-16B01-0401
   also_credit_code: string;       // e.g. XM400-16A01-0401
   notes: string | null;
+  created_at: string;
+}
+
+// ── Counters ─────────────────────────────────────────────────────────────────
+
+export interface Counter {
+  id: string;
+  stock_take_id: string;
+  name: string;
+  pin: string;
+  zone: string | null;
+  is_active: boolean;
   created_at: string;
 }
 
@@ -128,7 +197,11 @@ export interface CountResult {
   unit_cost: number | null;
   pastel_qty: number;
   count1_qty: number | null;
+  count1_direct_qty: number | null;
+  count1_wip_qty: number | null;
   count2_qty: number | null;
+  count2_direct_qty: number | null;
+  count2_wip_qty: number | null;
   accepted_qty: number | null;    // which count qty was accepted
   variance_qty: number | null;    // accepted_qty - pastel_qty
   variance_pct: number | null;    // variance_qty / pastel_qty * 100
