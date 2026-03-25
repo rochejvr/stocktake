@@ -12,19 +12,18 @@ export function ScanQRCard({ compact = false }: ScanQRCardProps) {
   const [scanUrl, setScanUrl] = useState('');
 
   useEffect(() => {
-    // Fetch the server's local network IP so the QR code works on phones
-    // Use HTTPS port 3443 (local-ssl-proxy) for camera access on mobile
-    async function resolveUrl() {
+    // In production (Vercel), use the origin directly (HTTPS).
+    // In local dev, fetch the LAN IP so phones on the same network can connect.
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname.match(/^(\d+\.){3}\d+$/);
+    if (isDev) {
       const { protocol, port } = window.location;
-      try {
-        const res = await fetch('/api/network-info');
-        const { ip } = await res.json();
-        setScanUrl(`${protocol}//${ip}${port ? `:${port}` : ''}/scan`);
-      } catch {
-        setScanUrl(`${window.location.origin}/scan`);
-      }
+      fetch('/api/network-info')
+        .then(r => r.json())
+        .then(({ ip }) => setScanUrl(`${protocol}//${ip}${port ? `:${port}` : ''}/scan`))
+        .catch(() => setScanUrl(`${window.location.origin}/scan`));
+    } else {
+      setScanUrl(`${window.location.origin}/scan`);
     }
-    resolveUrl();
   }, []);
 
   if (!scanUrl) return null;
