@@ -95,6 +95,11 @@ export default function ScanPage() {
   const qtyRef = useRef<HTMLInputElement>(null);
   const editQtyRef = useRef<HTMLInputElement>(null);
 
+  // ── Diagnostic mode ──────────────────────────────────────────────────────
+  const [diagMode, setDiagMode] = useState(false);
+  const [diagLog, setDiagLog] = useState<Array<{ barcode: string; valid: boolean; time: number }>>([]);
+  const diagStartRef = useRef<number>(0);
+
   // ── Init: load stock take + check for existing session ───────────────────
 
   useEffect(() => {
@@ -325,6 +330,27 @@ export default function ScanPage() {
     } catch {
       setError('Barcode lookup failed — check your connection');
     }
+  }, [stockTake]);
+
+  // Diagnostic scan handler — stays on camera, just logs
+  const handleDiagScan = useCallback(async (code: string) => {
+    const barcode = code.trim().toUpperCase();
+    if (!barcode || !stockTake) return;
+
+    const now = Date.now();
+    if (diagStartRef.current === 0) diagStartRef.current = now;
+
+    let valid = false;
+    try {
+      const res = await fetch(
+        `/api/scan/lookup?barcode=${encodeURIComponent(barcode)}&stockTakeId=${stockTake.id}`
+      );
+      const data = await res.json();
+      valid = !!data.valid;
+    } catch { /* treat as invalid */ }
+
+    setDiagLog(prev => [...prev, { barcode, valid, time: now }]);
+    vibrate();
   }, [stockTake]);
 
   // ── Confirm quantity ─────────────────────────────────────────────────────
@@ -803,11 +829,80 @@ export default function ScanPage() {
 
         {/* Camera scanner */}
         {!pending && scanMode === 'camera' && (
-          <CameraScanner
-            active={stage === 'scanning' && !pending}
-            onScan={handleBarcodeScan}
-            onCancel={() => setScanMode('manual')}
-          />
+          <>
+            <CameraScanner
+              active={stage === 'scanning' && !pending}
+              onScan={diagMode ? handleDiagScan : handleBarcodeScan}
+              onCancel={() => setScanMode('manual')}
+            />
+
+            {/* Diagnostic mode toggle + stats */}
+            <div className="mt-2">
+              <button
+                onClick={() => {
+                  if (diagMode) {
+                    // Turn off — reset
+                    setDiagMode(false);
+                    setDiagLog([]);
+                    diagStartRef.current = 0;
+                  } else {
+                    setDiagMode(true);
+                    setDiagLog([]);
+                    diagStartRef.current = 0;
+                  }
+                }}
+                className="text-[11px] font-medium px-2 py-1 rounded"
+                style={{
+                  background: diagMode ? 'var(--error)' : 'var(--card-bg)',
+                  color: diagMode ? 'white' : 'var(--muted)',
+                  border: diagMode ? 'none' : '1px solid var(--card-border)',
+                }}
+              >
+                {diagMode ? 'Stop Diagnostic' : 'Diagnostic Mode'}
+              </button>
+
+              {diagMode && diagLog.length > 0 && (() => {
+                const total = diagLog.length;
+                const valid = diagLog.filter(d => d.valid).length;
+                const pct = total > 0 ? Math.round((valid / total) * 100) : 0;
+                // Average time between consecutive scans
+                let avgInterval = 0;
+                if (total >= 2) {
+                  const intervals: number[] = [];
+                  for (let i = 1; i < diagLog.length; i++) {
+                    intervals.push(diagLog[i].time - diagLog[i - 1].time);
+                  }
+                  avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+                }
+                const lastBarcode = diagLog[diagLog.length - 1]?.barcode || '';
+                const lastValid = diagLog[diagLog.length - 1]?.valid;
+
+                return (
+                  <div className="mt-2 p-3 rounded-lg text-xs space-y-2" style={{ background: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div>
+                        <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)' }}>{total}</div>
+                        <div className="text-[10px] text-[var(--muted)]">Scans</div>
+                      </div>
+                      <div>
+                        <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: pct >= 50 ? 'var(--success)' : 'var(--error)' }}>{pct}%</div>
+                        <div className="text-[10px] text-[var(--muted)]">Valid</div>
+                      </div>
+                      <div>
+                        <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)' }}>
+                          {avgInterval > 0 ? `${(avgInterval / 1000).toFixed(1)}s` : '—'}
+                        </div>
+                        <div className="text-[10px] text-[var(--muted)]">Avg interval</div>
+                      </div>
+                    </div>
+                    <div className="text-[10px] font-mono truncate" style={{ color: lastValid ? 'var(--success)' : 'var(--error)' }}>
+                      Last: {lastBarcode} {lastValid ? '✓' : '✗'}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </>
         )}
 
         {/* Manual text input */}
