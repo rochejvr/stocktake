@@ -889,7 +889,7 @@ export default function ScanPage() {
                   if (e.key === 'Enter' && qty.trim() !== '') handleConfirmQty();
                   if (e.key === 'Escape') handleCancelPending();
                 }}
-                placeholder="Enter qty"
+                placeholder=""
                 className="w-full h-14 px-4 rounded-xl border-2 text-2xl font-bold bg-white text-center placeholder:text-base placeholder:font-normal placeholder:text-gray-300"
                 style={{ borderColor: 'var(--primary)', fontFamily: 'var(--font-display)', outline: 'none' }}
               />
