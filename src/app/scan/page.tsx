@@ -876,7 +876,7 @@ export default function ScanPage() {
             </div>
             <div>
               <label className="block text-[10px] font-semibold text-[var(--muted)] mb-1 uppercase tracking-wider">
-                Quantity counted
+                Tap to enter quantity
               </label>
               <input
                 ref={qtyRef}
@@ -886,11 +886,11 @@ export default function ScanPage() {
                 value={qty}
                 onChange={e => setQty(e.target.value)}
                 onKeyDown={e => {
-                  if (e.key === 'Enter') handleConfirmQty();
+                  if (e.key === 'Enter' && qty.trim() !== '') handleConfirmQty();
                   if (e.key === 'Escape') handleCancelPending();
                 }}
-                placeholder="1"
-                className="w-full h-14 px-4 rounded-xl border-2 text-2xl font-bold bg-white text-center"
+                placeholder="Enter qty"
+                className="w-full h-14 px-4 rounded-xl border-2 text-2xl font-bold bg-white text-center placeholder:text-base placeholder:font-normal placeholder:text-gray-300"
                 style={{ borderColor: 'var(--primary)', fontFamily: 'var(--font-display)', outline: 'none' }}
               />
             </div>
