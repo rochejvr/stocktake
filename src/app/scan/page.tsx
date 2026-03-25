@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ScanLine, Package, ArrowLeft, Check, X, Link2, Send, Trash2, Camera, Keyboard, Pencil, Warehouse } from 'lucide-react';
+import { ScanLine, Package, ArrowLeft, Check, X, Link2, Send, Trash2, Camera, Keyboard, Pencil, Warehouse, Delete } from 'lucide-react';
 import { CameraScanner } from '@/components/scan/CameraScanner';
 import { DiagnosticScanner } from '@/components/scan/DiagnosticScanner';
 import type { StockTake, ComponentChain } from '@/types';
@@ -830,74 +830,61 @@ export default function ScanPage() {
                   animation: 'slideUp 0.2s ease-out',
                 }}
               >
-                <div className="px-4 pt-3 pb-4">
-                  {/* Part info — single line, compact */}
-                  <div className="flex items-baseline gap-2 mb-3">
-                    <span className="font-mono text-sm font-bold text-white tracking-wide">
-                      {pending.barcode}
-                    </span>
-                    <span className="text-xs text-white/50 truncate">
-                      {pending.description}
-                    </span>
+                <div className="px-3 pt-3 pb-3">
+                  {/* Part info + qty display */}
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-mono text-sm font-bold text-white tracking-wide truncate">
+                        {pending.barcode}
+                      </div>
+                      <div className="text-[11px] text-white/40 truncate">{pending.description}</div>
+                    </div>
+                    <div className="text-3xl font-bold text-white ml-3 min-w-[3ch] text-right" style={{ fontFamily: 'var(--font-display)' }}>
+                      {qty || <span className="text-white/20">0</span>}
+                    </div>
                   </div>
 
-                  {/* Qty numpad row + actions */}
-                  <div className="flex items-center gap-2">
-                    {/* Quick qty buttons */}
-                    {[1, 2, 3, 5, 10].map(n => (
+                  {/* Numpad: 1-5, 6-0 */}
+                  <div className="grid grid-cols-5 gap-1.5 mb-2">
+                    {[1,2,3,4,5,6,7,8,9,0].map(n => (
                       <button
                         key={n}
-                        onClick={() => setQty(String(n))}
-                        className="flex-1 h-12 rounded-lg text-lg font-bold transition-all"
+                        onClick={() => setQty(prev => prev === '0' ? String(n) : prev + String(n))}
+                        className="h-11 rounded-lg text-lg font-bold transition-all active:scale-95"
                         style={{
-                          background: qty === String(n) ? 'var(--primary)' : 'rgba(255,255,255,0.12)',
-                          color: qty === String(n) ? 'white' : 'rgba(255,255,255,0.7)',
-                          border: qty === String(n) ? 'none' : '1px solid rgba(255,255,255,0.15)',
+                          background: 'rgba(255,255,255,0.12)',
+                          color: 'rgba(255,255,255,0.85)',
+                          border: '1px solid rgba(255,255,255,0.1)',
                         }}
                       >
                         {n}
                       </button>
                     ))}
-                    {/* Custom qty input */}
-                    <input
-                      ref={qtyRef}
-                      type="number"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      value={qty}
-                      onChange={e => setQty(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && qty.trim() !== '') handleConfirmQty();
-                        if (e.key === 'Escape') handleCancelPending();
-                      }}
-                      placeholder="#"
-                      className="w-14 h-12 rounded-lg text-lg font-bold text-center placeholder:text-white/30"
-                      style={{
-                        background: 'rgba(255,255,255,0.12)',
-                        color: 'white',
-                        border: '1px solid rgba(255,255,255,0.25)',
-                        outline: 'none',
-                        flexShrink: 0,
-                      }}
-                    />
                   </div>
 
-                  {/* Action buttons */}
-                  <div className="grid grid-cols-2 gap-2 mt-3">
+                  {/* Actions: Cancel / Backspace / Confirm */}
+                  <div className="grid grid-cols-[1fr_auto_1fr] gap-1.5">
                     <button
                       onClick={handleCancelPending}
-                      className="h-10 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 transition-all"
-                      style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)' }}
+                      className="h-10 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all"
+                      style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)' }}
                     >
-                      <X size={14} /> Cancel
+                      <X size={13} /> Cancel
+                    </button>
+                    <button
+                      onClick={() => setQty(prev => prev.slice(0, -1))}
+                      className="h-10 w-12 rounded-lg flex items-center justify-center transition-all"
+                      style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.5)' }}
+                    >
+                      <Delete size={18} />
                     </button>
                     <button
                       onClick={handleConfirmQty}
                       disabled={saving || qty.trim() === ''}
-                      className="h-10 rounded-lg text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-30 transition-all"
+                      className="h-10 rounded-lg text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-30 transition-all"
                       style={{ background: 'var(--success)', color: 'white' }}
                     >
-                      <Check size={14} /> {saving ? 'Saving...' : `Confirm ${qty || ''}`}
+                      <Check size={13} /> {saving ? '...' : `Confirm ${qty || ''}`}
                     </button>
                   </div>
                 </div>
@@ -953,66 +940,61 @@ export default function ScanPage() {
 
         {/* Manual mode qty confirmation */}
         {scanMode === 'manual' && pending && (
-          <div className="p-4 rounded-xl space-y-3" style={{ background: 'var(--card-bg)', border: '2px solid var(--primary)' }}>
-            <div className="flex items-baseline gap-2">
-              <span className="font-mono text-sm font-bold" style={{ color: 'var(--primary)' }}>
-                {pending.barcode}
-              </span>
-              <span className="text-xs text-[var(--muted)] truncate">
-                {pending.description}
-              </span>
+          <div className="p-3 rounded-xl space-y-2" style={{ background: 'var(--card-bg)', border: '2px solid var(--primary)' }}>
+            {/* Part info + qty display */}
+            <div className="flex items-center justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="font-mono text-sm font-bold tracking-wide" style={{ color: 'var(--primary)' }}>
+                  {pending.barcode}
+                </div>
+                <div className="text-[11px] text-[var(--muted)] truncate">{pending.description}</div>
+              </div>
+              <div className="text-3xl font-bold ml-3 min-w-[3ch] text-right" style={{ fontFamily: 'var(--font-display)', color: 'var(--foreground)' }}>
+                {qty || <span style={{ color: 'var(--card-border)' }}>0</span>}
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              {[1, 2, 3, 5, 10].map(n => (
+
+            {/* Numpad */}
+            <div className="grid grid-cols-5 gap-1.5">
+              {[1,2,3,4,5,6,7,8,9,0].map(n => (
                 <button
                   key={n}
-                  onClick={() => setQty(String(n))}
-                  className="flex-1 h-11 rounded-lg text-base font-bold transition-all"
+                  onClick={() => setQty(prev => prev === '0' ? String(n) : prev + String(n))}
+                  className="h-11 rounded-lg text-base font-bold transition-all active:scale-95"
                   style={{
-                    background: qty === String(n) ? 'var(--primary)' : 'white',
-                    color: qty === String(n) ? 'white' : 'var(--muted)',
-                    border: `1px solid ${qty === String(n) ? 'var(--primary)' : 'var(--card-border)'}`,
+                    background: 'white',
+                    color: 'var(--foreground)',
+                    border: '1px solid var(--card-border)',
                   }}
                 >
                   {n}
                 </button>
               ))}
-              <input
-                ref={qtyRef}
-                type="number"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={qty}
-                onChange={e => setQty(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && qty.trim() !== '') handleConfirmQty();
-                  if (e.key === 'Escape') handleCancelPending();
-                }}
-                placeholder="#"
-                className="w-14 h-11 rounded-lg text-base font-bold text-center"
-                style={{
-                  background: 'white',
-                  border: '1px solid var(--card-border)',
-                  outline: 'none',
-                  flexShrink: 0,
-                }}
-              />
             </div>
-            <div className="grid grid-cols-2 gap-2">
+
+            {/* Actions */}
+            <div className="grid grid-cols-[1fr_auto_1fr] gap-1.5">
               <button
                 onClick={handleCancelPending}
-                className="h-10 rounded-lg border text-sm font-semibold flex items-center justify-center gap-1.5"
-                style={{ borderColor: 'var(--card-border)' }}
+                className="h-10 rounded-lg text-xs font-semibold flex items-center justify-center gap-1"
+                style={{ border: '1px solid var(--card-border)' }}
               >
-                <X size={14} /> Cancel
+                <X size={13} /> Cancel
+              </button>
+              <button
+                onClick={() => setQty(prev => prev.slice(0, -1))}
+                className="h-10 w-12 rounded-lg flex items-center justify-center"
+                style={{ border: '1px solid var(--card-border)', color: 'var(--muted)' }}
+              >
+                <Delete size={18} />
               </button>
               <button
                 onClick={handleConfirmQty}
                 disabled={saving || qty.trim() === ''}
-                className="h-10 rounded-lg text-white text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-30"
+                className="h-10 rounded-lg text-white text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-30"
                 style={{ background: 'var(--success)' }}
               >
-                <Check size={14} /> {saving ? 'Saving...' : `Confirm ${qty || ''}`}
+                <Check size={13} /> {saving ? '...' : `Confirm ${qty || ''}`}
               </button>
             </div>
           </div>
