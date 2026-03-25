@@ -97,6 +97,7 @@ export default function ScanPage() {
 
   // ── Diagnostic mode ──────────────────────────────────────────────────────
   const [diagMode, setDiagMode] = useState(false);
+  const diagModeRef = useRef(false);
   const [diagLog, setDiagLog] = useState<Array<{ barcode: string; valid: boolean; time: number }>>([]);
   const diagStartRef = useRef<number>(0);
 
@@ -292,10 +293,31 @@ export default function ScanPage() {
 
   // ── Barcode scanned (Enter pressed) ──────────────────────────────────────
 
-  const handleBarcodeScan = useCallback(async (code: string) => {
+  // Unified scan handler — checks diagModeRef to decide behavior
+  const handleScan = useCallback(async (code: string) => {
     const barcode = code.trim().toUpperCase();
     if (!barcode || !stockTake) return;
 
+    if (diagModeRef.current) {
+      // Diagnostic: log and stay on camera
+      const now = Date.now();
+      if (diagStartRef.current === 0) diagStartRef.current = now;
+
+      let valid = false;
+      try {
+        const res = await fetch(
+          `/api/scan/lookup?barcode=${encodeURIComponent(barcode)}&stockTakeId=${stockTake.id}`
+        );
+        const data = await res.json();
+        valid = !!data.valid;
+      } catch { /* treat as invalid */ }
+
+      setDiagLog(prev => [...prev, { barcode, valid, time: now }]);
+      vibrate();
+      return;
+    }
+
+    // Normal flow
     setBarcodeInput('');
     setError(null);
 
@@ -330,27 +352,6 @@ export default function ScanPage() {
     } catch {
       setError('Barcode lookup failed — check your connection');
     }
-  }, [stockTake]);
-
-  // Diagnostic scan handler — stays on camera, just logs
-  const handleDiagScan = useCallback(async (code: string) => {
-    const barcode = code.trim().toUpperCase();
-    if (!barcode || !stockTake) return;
-
-    const now = Date.now();
-    if (diagStartRef.current === 0) diagStartRef.current = now;
-
-    let valid = false;
-    try {
-      const res = await fetch(
-        `/api/scan/lookup?barcode=${encodeURIComponent(barcode)}&stockTakeId=${stockTake.id}`
-      );
-      const data = await res.json();
-      valid = !!data.valid;
-    } catch { /* treat as invalid */ }
-
-    setDiagLog(prev => [...prev, { barcode, valid, time: now }]);
-    vibrate();
   }, [stockTake]);
 
   // ── Confirm quantity ─────────────────────────────────────────────────────
@@ -832,7 +833,7 @@ export default function ScanPage() {
           <>
             <CameraScanner
               active={stage === 'scanning' && !pending}
-              onScan={diagMode ? handleDiagScan : handleBarcodeScan}
+              onScan={handleScan}
               onCancel={() => setScanMode('manual')}
             />
 
@@ -841,12 +842,13 @@ export default function ScanPage() {
               <button
                 onClick={() => {
                   if (diagMode) {
-                    // Turn off — reset
                     setDiagMode(false);
+                    diagModeRef.current = false;
                     setDiagLog([]);
                     diagStartRef.current = 0;
                   } else {
                     setDiagMode(true);
+                    diagModeRef.current = true;
                     setDiagLog([]);
                     diagStartRef.current = 0;
                   }
@@ -918,7 +920,7 @@ export default function ScanPage() {
               onChange={e => setBarcodeInput(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter' && barcodeInput.trim()) {
-                  handleBarcodeScan(barcodeInput);
+                  handleScan(barcodeInput);
                 }
               }}
               placeholder="Type or scan barcode..."
