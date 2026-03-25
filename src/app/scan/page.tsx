@@ -207,10 +207,14 @@ export default function ScanPage() {
 
   useEffect(() => {
     if (pending) {
+      // Delay for iOS to register the new input, then focus to trigger keyboard
       const t = setTimeout(() => {
-        qtyRef.current?.focus();
-        qtyRef.current?.select();
-      }, 100);
+        if (qtyRef.current) {
+          qtyRef.current.focus();
+          // iOS needs a click() to reliably show the keyboard
+          qtyRef.current.click();
+        }
+      }, 200);
       return () => clearTimeout(t);
     }
   }, [pending]);
@@ -326,7 +330,7 @@ export default function ScanPage() {
         barcode,
         description: data.description || barcode,
       });
-      setQty('1');
+      setQty('');
     } catch {
       setError('Barcode lookup failed — check your connection');
     }
@@ -337,7 +341,7 @@ export default function ScanPage() {
   const handleConfirmQty = useCallback(async () => {
     if (!pending || !session || !stockTake) return;
 
-    const quantity = parseInt(qty, 10);
+    const quantity = qty.trim() === '' ? 1 : parseInt(qty, 10);
     if (isNaN(quantity) || quantity < 0) {
       setError('Enter a valid quantity');
       return;
@@ -885,6 +889,7 @@ export default function ScanPage() {
                   if (e.key === 'Enter') handleConfirmQty();
                   if (e.key === 'Escape') handleCancelPending();
                 }}
+                placeholder="1"
                 className="w-full h-14 px-4 rounded-xl border-2 text-2xl font-bold bg-white text-center"
                 style={{ borderColor: 'var(--primary)', fontFamily: 'var(--font-display)', outline: 'none' }}
               />

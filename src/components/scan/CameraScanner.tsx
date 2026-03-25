@@ -69,10 +69,18 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
           return;
         }
 
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        // Crop to scan guide region (center 75% width, ~10% height strip)
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        const cropW = Math.round(vw * 0.75);
+        const cropH = Math.round(vh * 0.12);
+        const cropX = Math.round((vw - cropW) / 2);
+        const cropY = Math.round((vh - cropH) / 2);
+
+        canvas.width = cropW;
+        canvas.height = cropH;
+        ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+        const imageData = ctx.getImageData(0, 0, cropW, cropH);
 
         try {
           const results = await readBarcodes(imageData, {
