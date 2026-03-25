@@ -1078,7 +1078,7 @@ export default function ScanPage() {
                   ) : (
                     <div className="flex items-center gap-1 flex-shrink-0">
                       <div className="text-sm font-bold mr-1" style={{ fontFamily: 'var(--font-display)' }}>
-                        ×{item.qty}
+                        {item.qty}
                       </div>
                       <button
                         onClick={() => handleStartEdit(item)}
