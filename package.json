@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@ericblade/quagga2": "^1.12.1",
     "@supabase/supabase-js": "^2.99.3",
     "date-fns": "^4.1.0",
     "html5-qrcode": "^2.3.8",
@@ -17,7 +18,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-qr-code": "^2.0.18",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zxing-wasm": "^3.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
