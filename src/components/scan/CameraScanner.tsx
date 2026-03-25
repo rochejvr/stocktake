@@ -139,7 +139,7 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
           className="w-full"
           playsInline
           muted
-          style={{ display: started ? 'block' : 'none' }}
+          style={{ display: started ? 'block' : 'none', maxHeight: '40vh', objectFit: 'cover' }}
         />
         {/* Scan guide overlay */}
         {started && (
