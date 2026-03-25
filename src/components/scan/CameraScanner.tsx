@@ -9,23 +9,16 @@ interface CameraScannerProps {
   onCancel?: () => void;
 }
 
-// Number of identical consecutive reads required before accepting
+// Consensus: require 2 identical reads within 3s before accepting
 const CONSENSUS_COUNT = 2;
-// Max time window (ms) for consensus reads to accumulate
 const CONSENSUS_WINDOW = 3000;
-// Debounce: ignore same accepted barcode within this window
 const DEBOUNCE_MS = 2000;
 
 export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) {
   const scannerRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const animFrameRef = useRef<number>(0);
   const html5QrCodeRef = useRef<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
-  const [mode, setMode] = useState<'native' | 'zxing' | null>(null);
 
   // Consensus tracking
   const consensusRef = useRef<{ value: string; count: number; firstSeen: number }>({
@@ -47,12 +40,11 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
       return;
     }
 
-    // Consensus: require CONSENSUS_COUNT identical reads within CONSENSUS_WINDOW
+    // Consensus: require CONSENSUS_COUNT identical reads
     const c = consensusRef.current;
     if (trimmed === c.value && now - c.firstSeen < CONSENSUS_WINDOW) {
       c.count++;
     } else {
-      // New barcode or window expired — reset
       consensusRef.current = { value: trimmed, count: 1, firstSeen: now };
       return;
     }
@@ -65,17 +57,7 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
     }
   }, []);
 
-  const stopAll = useCallback(async () => {
-    // Stop native path
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = 0;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
-    // Stop ZXing path
+  const stopScanner = useCallback(async () => {
     if (html5QrCodeRef.current) {
       try {
         const state = html5QrCodeRef.current.getState();
@@ -83,66 +65,18 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
       } catch { /* ignore */ }
       try { html5QrCodeRef.current.clear(); } catch { /* ignore */ }
       html5QrCodeRef.current = null;
+      setStarted(false);
     }
-    setStarted(false);
-    setMode(null);
   }, []);
 
   const startScanner = useCallback(async () => {
-    // ── Try native BarcodeDetector first (Chrome Android) ──
-    let useNative = false;
-    if ('BarcodeDetector' in window) {
-      try {
-        const formats = await (window as any).BarcodeDetector.getSupportedFormats();
-        if (formats.includes('code_128')) {
-          useNative = true;
-        }
-      } catch { /* not available */ }
-    }
+    if (!scannerRef.current || html5QrCodeRef.current) return;
 
-    if (useNative) {
-      // Native path: own video element + requestAnimationFrame
-      try {
-        const detector = new (window as any).BarcodeDetector({ formats: ['code_128'] });
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-        });
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-        setMode('native');
-        setStarted(true);
-        setError(null);
-
-        const video = videoRef.current!;
-        const scanFrame = async () => {
-          if (!streamRef.current || !video.videoWidth) {
-            animFrameRef.current = requestAnimationFrame(scanFrame);
-            return;
-          }
-          try {
-            const barcodes = await detector.detect(video);
-            for (const b of barcodes) acceptBarcode(b.rawValue);
-          } catch { /* ignore */ }
-          setTimeout(() => {
-            if (streamRef.current) animFrameRef.current = requestAnimationFrame(scanFrame);
-          }, 66); // ~15 FPS
-        };
-        animFrameRef.current = requestAnimationFrame(scanFrame);
-        return;
-      } catch {
-        // Fall through to ZXing
-      }
-    }
-
-    // ── ZXing fallback: use Html5Qrcode.start() (proven to work on iOS) ──
     try {
       const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
 
       const scannerId = 'camera-scanner-region';
-      if (scannerRef.current) scannerRef.current.id = scannerId;
+      scannerRef.current.id = scannerId;
 
       const scanner = new Html5Qrcode(scannerId, {
         formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128],
@@ -163,7 +97,6 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
         () => { /* no barcode in frame */ }
       );
 
-      setMode('zxing');
       setStarted(true);
       setError(null);
     } catch (e) {
@@ -182,17 +115,17 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
     if (active) {
       startScanner();
     } else {
-      stopAll();
+      stopScanner();
     }
-    return () => { stopAll(); };
-  }, [active, startScanner, stopAll]);
+    return () => { stopScanner(); };
+  }, [active, startScanner, stopScanner]);
 
   if (!active) return null;
 
   return (
     <div className="rounded-xl overflow-hidden border relative" style={{ borderColor: 'var(--card-border)' }}>
       {/* Cancel button */}
-      {onCancel && started && (
+      {onCancel && (
         <button
           onClick={onCancel}
           className="absolute top-2 right-2 z-10 w-8 h-8 rounded-full bg-black/50 flex items-center justify-center"
@@ -201,41 +134,17 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
         </button>
       )}
 
-      {/* Native path: own video element */}
-      {mode === 'native' && (
-        <div className="relative w-full bg-black" style={{ maxHeight: 260 }}>
-          <video
-            ref={videoRef}
-            className="w-full"
-            playsInline
-            muted
-            style={{ display: started ? 'block' : 'none', maxHeight: 260, objectFit: 'cover' }}
-          />
-          {started && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div
-                className="border-2 border-white/60 rounded-lg"
-                style={{ width: '75%', height: 50, boxShadow: '0 0 0 9999px rgba(0,0,0,0.3)' }}
-              />
-            </div>
-          )}
-          <canvas ref={canvasRef} className="hidden" />
-        </div>
-      )}
-
-      {/* ZXing path: Html5Qrcode manages its own video inside this div */}
-      {mode !== 'native' && (
-        <div
-          ref={scannerRef}
-          className="w-full bg-black"
-          style={{ maxHeight: 260 }}
-        />
-      )}
+      {/* Html5Qrcode manages its own video inside this div */}
+      <div
+        ref={scannerRef}
+        className="w-full bg-black"
+        style={{ minHeight: 200 }}
+      />
 
       {/* Mode indicator */}
-      {started && mode && (
+      {started && (
         <div className="px-3 py-1 text-[10px] text-center" style={{ color: 'var(--muted)', background: 'var(--card-bg)' }}>
-          {mode === 'native' ? 'Native detection' : 'Software detection'} · {CONSENSUS_COUNT}× verify
+          {CONSENSUS_COUNT}× verify enabled
         </div>
       )}
 
