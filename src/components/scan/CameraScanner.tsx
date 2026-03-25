@@ -9,79 +9,103 @@ interface CameraScannerProps {
   onCancel?: () => void;
 }
 
+const DEBOUNCE_MS = 2000;
+
 export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) {
-  const scannerRef = useRef<HTMLDivElement>(null);
-  const html5QrCodeRef = useRef<any>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const scanLoopRef = useRef<number>(0);
   const [error, setError] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
   const lastScanRef = useRef<string>('');
   const lastScanTimeRef = useRef<number>(0);
 
+  const onScanRef = useRef(onScan);
+  onScanRef.current = onScan;
+
+  const stopScanner = useCallback(() => {
+    if (scanLoopRef.current) {
+      cancelAnimationFrame(scanLoopRef.current);
+      scanLoopRef.current = 0;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+    setStarted(false);
+  }, []);
+
   const startScanner = useCallback(async () => {
-    if (!scannerRef.current || html5QrCodeRef.current) return;
-
     try {
-      const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
+      // Request high resolution for thin barcodes
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+      });
+      streamRef.current = stream;
 
-      const scannerId = 'camera-scanner-region';
-      if (scannerRef.current) {
-        scannerRef.current.id = scannerId;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
       }
 
-      const scanner = new Html5Qrcode(scannerId, {
-        formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128],
-        verbose: false,
-      });
-      html5QrCodeRef.current = scanner;
-
-      await scanner.start(
-        { facingMode: 'environment' },
-        {
-          fps: 10,
-          qrbox: { width: 280, height: 120 },
-          aspectRatio: 1.777,
-        },
-        (decodedText: string) => {
-          // Debounce: ignore same barcode within 2 seconds
-          const now = Date.now();
-          if (decodedText === lastScanRef.current && now - lastScanTimeRef.current < 2000) {
-            return;
-          }
-          lastScanRef.current = decodedText;
-          lastScanTimeRef.current = now;
-          onScan(decodedText);
-        },
-        () => { /* ignore scan failures (no barcode in frame) */ }
-      );
+      // Load ZXing-WASM reader
+      const { readBarcodes } = await import('zxing-wasm/reader');
 
       setStarted(true);
       setError(null);
+
+      const video = videoRef.current!;
+      const canvas = canvasRef.current!;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+
+      const scan = async () => {
+        if (!streamRef.current || !video.videoWidth) {
+          scanLoopRef.current = requestAnimationFrame(scan);
+          return;
+        }
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        try {
+          const results = await readBarcodes(imageData, {
+            formats: ['Code128'],
+            tryHarder: true,
+          });
+          for (const r of results) {
+            if (!r.text) continue;
+            const now = Date.now();
+            if (r.text === lastScanRef.current && now - lastScanTimeRef.current < DEBOUNCE_MS) {
+              continue;
+            }
+            lastScanRef.current = r.text;
+            lastScanTimeRef.current = now;
+            onScanRef.current(r.text);
+          }
+        } catch { /* decode error — ignore */ }
+
+        setTimeout(() => {
+          if (streamRef.current) scanLoopRef.current = requestAnimationFrame(scan);
+        }, 100); // ~10 FPS
+      };
+
+      scanLoopRef.current = requestAnimationFrame(scan);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('Permission')) {
+      if (msg.includes('Permission') || msg.includes('NotAllowed')) {
         setError('Camera permission denied. Please allow camera access.');
       } else if (msg.includes('NotFound') || msg.includes('not found')) {
         setError('No camera found on this device.');
       } else {
         setError(`Camera error: ${msg}`);
       }
-    }
-  }, [onScan]);
-
-  const stopScanner = useCallback(async () => {
-    if (html5QrCodeRef.current) {
-      try {
-        const state = html5QrCodeRef.current.getState();
-        // State 2 = SCANNING
-        if (state === 2) {
-          await html5QrCodeRef.current.stop();
-        }
-      } catch { /* ignore */ }
-      try {
-        html5QrCodeRef.current.clear();
-      } catch { /* ignore */ }
-      html5QrCodeRef.current = null;
-      setStarted(false);
     }
   }, []);
 
@@ -91,7 +115,6 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
     } else {
       stopScanner();
     }
-
     return () => { stopScanner(); };
   }, [active, startScanner, stopScanner]);
 
@@ -109,12 +132,26 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
         </button>
       )}
 
-      {/* Scanner viewport */}
-      <div
-        ref={scannerRef}
-        className="w-full bg-black"
-        style={{ minHeight: 200 }}
-      />
+      {/* Camera viewport */}
+      <div className="relative w-full bg-black" style={{ minHeight: 200 }}>
+        <video
+          ref={videoRef}
+          className="w-full"
+          playsInline
+          muted
+          style={{ display: started ? 'block' : 'none' }}
+        />
+        {/* Scan guide overlay */}
+        {started && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div
+              className="border-2 border-white/60 rounded-lg"
+              style={{ width: '75%', height: 60, boxShadow: '0 0 0 9999px rgba(0,0,0,0.3)' }}
+            />
+          </div>
+        )}
+        <canvas ref={canvasRef} className="hidden" />
+      </div>
 
       {error && (
         <div className="p-3 bg-[var(--error-light)] text-[var(--error)] text-sm text-center">
