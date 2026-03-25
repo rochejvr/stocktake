@@ -1,35 +1,36 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera } from 'lucide-react';
+import { Camera, X } from 'lucide-react';
 
 interface CameraScannerProps {
   active: boolean;
   onScan: (barcode: string) => void;
+  onCancel?: () => void;
 }
 
 // Number of identical consecutive reads required before accepting
-const CONSENSUS_COUNT = 3;
+const CONSENSUS_COUNT = 2;
 // Max time window (ms) for consensus reads to accumulate
-const CONSENSUS_WINDOW = 2000;
+const CONSENSUS_WINDOW = 3000;
 // Debounce: ignore same accepted barcode within this window
 const DEBOUNCE_MS = 2000;
 
-export function CameraScanner({ active, onScan }: CameraScannerProps) {
+export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) {
+  const scannerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number>(0);
+  const html5QrCodeRef = useRef<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
   const [mode, setMode] = useState<'native' | 'zxing' | null>(null);
 
-  // Consensus tracking: accumulate identical reads
+  // Consensus tracking
   const consensusRef = useRef<{ value: string; count: number; firstSeen: number }>({
     value: '', count: 0, firstSeen: 0,
   });
-
-  // Debounce: don't re-fire same accepted barcode
   const lastAcceptedRef = useRef<string>('');
   const lastAcceptedTimeRef = useRef<number>(0);
 
@@ -53,11 +54,10 @@ export function CameraScanner({ active, onScan }: CameraScannerProps) {
     } else {
       // New barcode or window expired — reset
       consensusRef.current = { value: trimmed, count: 1, firstSeen: now };
-      return; // Need more reads
+      return;
     }
 
     if (c.count >= CONSENSUS_COUNT) {
-      // Consensus reached — fire callback
       lastAcceptedRef.current = trimmed;
       lastAcceptedTimeRef.current = now;
       consensusRef.current = { value: '', count: 0, firstSeen: 0 };
@@ -65,7 +65,8 @@ export function CameraScanner({ active, onScan }: CameraScannerProps) {
     }
   }, []);
 
-  const stopCamera = useCallback(() => {
+  const stopAll = useCallback(async () => {
+    // Stop native path
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = 0;
@@ -74,118 +75,97 @@ export function CameraScanner({ active, onScan }: CameraScannerProps) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
+    // Stop ZXing path
+    if (html5QrCodeRef.current) {
+      try {
+        const state = html5QrCodeRef.current.getState();
+        if (state === 2) await html5QrCodeRef.current.stop();
+      } catch { /* ignore */ }
+      try { html5QrCodeRef.current.clear(); } catch { /* ignore */ }
+      html5QrCodeRef.current = null;
+    }
     setStarted(false);
     setMode(null);
   }, []);
 
-  const startCamera = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-      });
-      streamRef.current = stream;
+  const startScanner = useCallback(async () => {
+    // ── Try native BarcodeDetector first (Chrome Android) ──
+    let useNative = false;
+    if ('BarcodeDetector' in window) {
+      try {
+        const formats = await (window as any).BarcodeDetector.getSupportedFormats();
+        if (formats.includes('code_128')) {
+          useNative = true;
+        }
+      } catch { /* not available */ }
+    }
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+    if (useNative) {
+      // Native path: own video element + requestAnimationFrame
+      try {
+        const detector = new (window as any).BarcodeDetector({ formats: ['code_128'] });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        });
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+        setMode('native');
+        setStarted(true);
+        setError(null);
 
-      // Check for native BarcodeDetector (Chrome Android, Safari 17.2+)
-      const hasNative = 'BarcodeDetector' in window;
-      let detector: any = null;
-
-      if (hasNative) {
-        try {
-          const formats = await (window as any).BarcodeDetector.getSupportedFormats();
-          if (formats.includes('code_128')) {
-            detector = new (window as any).BarcodeDetector({ formats: ['code_128'] });
-            setMode('native');
+        const video = videoRef.current!;
+        const scanFrame = async () => {
+          if (!streamRef.current || !video.videoWidth) {
+            animFrameRef.current = requestAnimationFrame(scanFrame);
+            return;
           }
-        } catch {
-          // Native detector failed — fall through to ZXing
-        }
+          try {
+            const barcodes = await detector.detect(video);
+            for (const b of barcodes) acceptBarcode(b.rawValue);
+          } catch { /* ignore */ }
+          setTimeout(() => {
+            if (streamRef.current) animFrameRef.current = requestAnimationFrame(scanFrame);
+          }, 66); // ~15 FPS
+        };
+        animFrameRef.current = requestAnimationFrame(scanFrame);
+        return;
+      } catch {
+        // Fall through to ZXing
       }
+    }
 
-      if (!detector) {
-        // Fallback: use html5-qrcode (ZXing-js) in video-frame mode
-        setMode('zxing');
-      }
+    // ── ZXing fallback: use Html5Qrcode.start() (proven to work on iOS) ──
+    try {
+      const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
 
-      // Pre-load ZXing fallback if needed
-      let zxingInstance: any = null;
-      if (!detector) {
-        try {
-          const { Html5Qrcode } = await import('html5-qrcode');
-          // Instance method — needs a dummy container element
-          const dummyDiv = document.createElement('div');
-          dummyDiv.id = 'zxing-fallback-' + Date.now();
-          dummyDiv.style.display = 'none';
-          document.body.appendChild(dummyDiv);
-          zxingInstance = new Html5Qrcode(dummyDiv.id);
-          setMode('zxing');
-        } catch {
-          setError('Could not load barcode scanner library.');
-          return;
-        }
-      }
+      const scannerId = 'camera-scanner-region';
+      if (scannerRef.current) scannerRef.current.id = scannerId;
 
+      const scanner = new Html5Qrcode(scannerId, {
+        formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128],
+        verbose: false,
+      });
+      html5QrCodeRef.current = scanner;
+
+      await scanner.start(
+        { facingMode: 'environment' },
+        {
+          fps: 15,
+          qrbox: { width: 280, height: 100 },
+          aspectRatio: 1.333,
+        },
+        (decodedText: string) => {
+          acceptBarcode(decodedText);
+        },
+        () => { /* no barcode in frame */ }
+      );
+
+      setMode('zxing');
       setStarted(true);
       setError(null);
-
-      // Scan loop — capture frames and decode
-      const video = videoRef.current!;
-      const canvas = canvasRef.current!;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-
-      const scanFrame = async () => {
-        if (!streamRef.current || !video.videoWidth) {
-          animFrameRef.current = requestAnimationFrame(scanFrame);
-          return;
-        }
-
-        try {
-          if (detector) {
-            // Native BarcodeDetector — very accurate, works directly on video element
-            const barcodes = await detector.detect(video);
-            for (const barcode of barcodes) {
-              acceptBarcode(barcode.rawValue);
-            }
-          } else if (zxingInstance) {
-            // ZXing fallback — capture frame to canvas, convert to file, decode
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            ctx.drawImage(video, 0, 0);
-            const blob = await new Promise<Blob | null>((resolve) => {
-              canvas.toBlob(b => resolve(b), 'image/jpeg', 0.85);
-            });
-            if (blob) {
-              const file = new File([blob], 'frame.jpg', { type: 'image/jpeg' });
-              try {
-                const result = await zxingInstance.scanFile(file, false);
-                if (result) acceptBarcode(result);
-              } catch {
-                // No barcode in frame — normal
-              }
-            }
-          }
-        } catch {
-          // Scan error — ignore, try next frame
-        }
-
-        // ~15 FPS for native, ~5 FPS for ZXing fallback (heavier processing)
-        const delay = detector ? 66 : 200;
-        setTimeout(() => {
-          if (streamRef.current) {
-            animFrameRef.current = requestAnimationFrame(scanFrame);
-          }
-        }, delay);
-      };
-
-      animFrameRef.current = requestAnimationFrame(scanFrame);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg.includes('Permission') || msg.includes('NotAllowed')) {
@@ -200,43 +180,62 @@ export function CameraScanner({ active, onScan }: CameraScannerProps) {
 
   useEffect(() => {
     if (active) {
-      startCamera();
+      startScanner();
     } else {
-      stopCamera();
+      stopAll();
     }
-    return () => { stopCamera(); };
-  }, [active, startCamera, stopCamera]);
+    return () => { stopAll(); };
+  }, [active, startScanner, stopAll]);
 
   if (!active) return null;
 
   return (
-    <div className="rounded-xl overflow-hidden border" style={{ borderColor: 'var(--card-border)' }}>
-      {/* Camera viewport */}
-      <div className="relative w-full bg-black" style={{ minHeight: 200 }}>
-        <video
-          ref={videoRef}
-          className="w-full"
-          playsInline
-          muted
-          style={{ display: started ? 'block' : 'none' }}
+    <div className="rounded-xl overflow-hidden border relative" style={{ borderColor: 'var(--card-border)' }}>
+      {/* Cancel button */}
+      {onCancel && started && (
+        <button
+          onClick={onCancel}
+          className="absolute top-2 right-2 z-10 w-8 h-8 rounded-full bg-black/50 flex items-center justify-center"
+        >
+          <X size={16} className="text-white" />
+        </button>
+      )}
+
+      {/* Native path: own video element */}
+      {mode === 'native' && (
+        <div className="relative w-full bg-black" style={{ maxHeight: 260 }}>
+          <video
+            ref={videoRef}
+            className="w-full"
+            playsInline
+            muted
+            style={{ display: started ? 'block' : 'none', maxHeight: 260, objectFit: 'cover' }}
+          />
+          {started && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div
+                className="border-2 border-white/60 rounded-lg"
+                style={{ width: '75%', height: 50, boxShadow: '0 0 0 9999px rgba(0,0,0,0.3)' }}
+              />
+            </div>
+          )}
+          <canvas ref={canvasRef} className="hidden" />
+        </div>
+      )}
+
+      {/* ZXing path: Html5Qrcode manages its own video inside this div */}
+      {mode !== 'native' && (
+        <div
+          ref={scannerRef}
+          className="w-full bg-black"
+          style={{ maxHeight: 260 }}
         />
-        {/* Scan guide overlay */}
-        {started && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div
-              className="border-2 border-white/60 rounded-lg"
-              style={{ width: '75%', height: 60, boxShadow: '0 0 0 9999px rgba(0,0,0,0.3)' }}
-            />
-          </div>
-        )}
-        {/* Hidden canvas for frame capture */}
-        <canvas ref={canvasRef} className="hidden" />
-      </div>
+      )}
 
       {/* Mode indicator */}
       {started && mode && (
-        <div className="px-3 py-1.5 text-[10px] text-center" style={{ color: 'var(--muted)', background: 'var(--card-bg)' }}>
-          {mode === 'native' ? 'Native barcode detection' : 'Software barcode detection'} · Consensus: {CONSENSUS_COUNT} reads
+        <div className="px-3 py-1 text-[10px] text-center" style={{ color: 'var(--muted)', background: 'var(--card-bg)' }}>
+          {mode === 'native' ? 'Native detection' : 'Software detection'} · {CONSENSUS_COUNT}× verify
         </div>
       )}
 

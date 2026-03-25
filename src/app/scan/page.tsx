@@ -806,6 +806,7 @@ export default function ScanPage() {
           <CameraScanner
             active={stage === 'scanning' && !pending}
             onScan={handleBarcodeScan}
+            onCancel={() => setScanMode('manual')}
           />
         )}
 
