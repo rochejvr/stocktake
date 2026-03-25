@@ -904,7 +904,7 @@ export default function ScanPage() {
               </button>
               <button
                 onClick={handleConfirmQty}
-                disabled={saving}
+                disabled={saving || qty.trim() === ''}
                 className="h-11 rounded-lg text-white text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
                 style={{ background: 'var(--success)' }}
               >
