@@ -810,37 +810,123 @@ export default function ScanPage() {
           </div>
         )}
 
-        {/* Camera scanner — normal mode */}
-        {!pending && scanMode === 'camera' && !diagMode && (
-          <>
+        {/* Camera scanner — always visible when in camera mode */}
+        {scanMode === 'camera' && !diagMode && (
+          <div className="relative">
             <CameraScanner
-              active={stage === 'scanning' && !pending}
+              active={stage === 'scanning'}
               onScan={handleScan}
               onCancel={() => setScanMode('manual')}
             />
-            <button
-              onClick={() => setDiagMode(true)}
-              className="mt-2 text-[11px] font-medium px-2 py-1 rounded"
-              style={{ background: 'var(--card-bg)', color: 'var(--muted)', border: '1px solid var(--card-border)' }}
-            >
-              Diagnostic Mode
-            </button>
-          </>
+
+            {/* Qty overlay — slides up over camera when barcode scanned */}
+            {pending && (
+              <div
+                className="absolute inset-x-0 bottom-0 rounded-b-xl overflow-hidden"
+                style={{
+                  background: 'rgba(0,0,0,0.85)',
+                  backdropFilter: 'blur(8px)',
+                  WebkitBackdropFilter: 'blur(8px)',
+                  animation: 'slideUp 0.2s ease-out',
+                }}
+              >
+                <div className="px-4 pt-3 pb-4">
+                  {/* Part info — single line, compact */}
+                  <div className="flex items-baseline gap-2 mb-3">
+                    <span className="font-mono text-sm font-bold text-white tracking-wide">
+                      {pending.barcode}
+                    </span>
+                    <span className="text-xs text-white/50 truncate">
+                      {pending.description}
+                    </span>
+                  </div>
+
+                  {/* Qty numpad row + actions */}
+                  <div className="flex items-center gap-2">
+                    {/* Quick qty buttons */}
+                    {[1, 2, 3, 5, 10].map(n => (
+                      <button
+                        key={n}
+                        onClick={() => setQty(String(n))}
+                        className="flex-1 h-12 rounded-lg text-lg font-bold transition-all"
+                        style={{
+                          background: qty === String(n) ? 'var(--primary)' : 'rgba(255,255,255,0.12)',
+                          color: qty === String(n) ? 'white' : 'rgba(255,255,255,0.7)',
+                          border: qty === String(n) ? 'none' : '1px solid rgba(255,255,255,0.15)',
+                        }}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                    {/* Custom qty input */}
+                    <input
+                      ref={qtyRef}
+                      type="number"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={qty}
+                      onChange={e => setQty(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && qty.trim() !== '') handleConfirmQty();
+                        if (e.key === 'Escape') handleCancelPending();
+                      }}
+                      placeholder="#"
+                      className="w-14 h-12 rounded-lg text-lg font-bold text-center placeholder:text-white/30"
+                      style={{
+                        background: 'rgba(255,255,255,0.12)',
+                        color: 'white',
+                        border: '1px solid rgba(255,255,255,0.25)',
+                        outline: 'none',
+                        flexShrink: 0,
+                      }}
+                    />
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="grid grid-cols-2 gap-2 mt-3">
+                    <button
+                      onClick={handleCancelPending}
+                      className="h-10 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 transition-all"
+                      style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)' }}
+                    >
+                      <X size={14} /> Cancel
+                    </button>
+                    <button
+                      onClick={handleConfirmQty}
+                      disabled={saving || qty.trim() === ''}
+                      className="h-10 rounded-lg text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-30 transition-all"
+                      style={{ background: 'var(--success)', color: 'white' }}
+                    >
+                      <Check size={14} /> {saving ? 'Saving...' : `Confirm ${qty || ''}`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!pending && (
+              <button
+                onClick={() => setDiagMode(true)}
+                className="mt-2 text-[11px] font-medium px-2 py-1 rounded"
+                style={{ background: 'var(--card-bg)', color: 'var(--muted)', border: '1px solid var(--card-border)' }}
+              >
+                Diagnostic Mode
+              </button>
+            )}
+          </div>
         )}
 
         {/* Diagnostic scanner — multi-engine comparison */}
-        {!pending && scanMode === 'camera' && diagMode && stockTake && (
-          <>
-            <DiagnosticScanner
-              active={stage === 'scanning' && !pending}
-              stockTakeId={stockTake.id}
-              onExit={() => setDiagMode(false)}
-            />
-          </>
+        {scanMode === 'camera' && diagMode && stockTake && (
+          <DiagnosticScanner
+            active={stage === 'scanning' && !pending}
+            stockTakeId={stockTake.id}
+            onExit={() => setDiagMode(false)}
+          />
         )}
 
         {/* Manual text input */}
-        {!pending && scanMode === 'manual' && (
+        {scanMode === 'manual' && !pending && (
           <div>
             <label className="block text-[10px] font-semibold text-[var(--muted)] mb-1.5 uppercase tracking-wider">
               Type barcode and press Enter
@@ -865,19 +951,32 @@ export default function ScanPage() {
           </div>
         )}
 
-        {/* Qty confirmation (shown after scan from either mode) */}
-        {pending && (
-          <div className="card p-4 space-y-3" style={{ borderColor: 'var(--primary)', borderWidth: 2 }}>
-            <div>
-              <div className="font-mono text-base font-bold tracking-wide" style={{ color: 'var(--primary)' }}>
+        {/* Manual mode qty confirmation */}
+        {scanMode === 'manual' && pending && (
+          <div className="p-4 rounded-xl space-y-3" style={{ background: 'var(--card-bg)', border: '2px solid var(--primary)' }}>
+            <div className="flex items-baseline gap-2">
+              <span className="font-mono text-sm font-bold" style={{ color: 'var(--primary)' }}>
                 {pending.barcode}
-              </div>
-              <div className="text-sm text-[var(--muted)] mt-0.5">{pending.description}</div>
+              </span>
+              <span className="text-xs text-[var(--muted)] truncate">
+                {pending.description}
+              </span>
             </div>
-            <div>
-              <label className="block text-[10px] font-semibold text-[var(--muted)] mb-1 uppercase tracking-wider">
-                Tap to enter quantity
-              </label>
+            <div className="flex items-center gap-2">
+              {[1, 2, 3, 5, 10].map(n => (
+                <button
+                  key={n}
+                  onClick={() => setQty(String(n))}
+                  className="flex-1 h-11 rounded-lg text-base font-bold transition-all"
+                  style={{
+                    background: qty === String(n) ? 'var(--primary)' : 'white',
+                    color: qty === String(n) ? 'white' : 'var(--muted)',
+                    border: `1px solid ${qty === String(n) ? 'var(--primary)' : 'var(--card-border)'}`,
+                  }}
+                >
+                  {n}
+                </button>
+              ))}
               <input
                 ref={qtyRef}
                 type="number"
@@ -889,26 +988,31 @@ export default function ScanPage() {
                   if (e.key === 'Enter' && qty.trim() !== '') handleConfirmQty();
                   if (e.key === 'Escape') handleCancelPending();
                 }}
-                placeholder=""
-                className="w-full h-14 px-4 rounded-xl border-2 text-2xl font-bold bg-white text-center placeholder:text-base placeholder:font-normal placeholder:text-gray-300"
-                style={{ borderColor: 'var(--primary)', fontFamily: 'var(--font-display)', outline: 'none' }}
+                placeholder="#"
+                className="w-14 h-11 rounded-lg text-base font-bold text-center"
+                style={{
+                  background: 'white',
+                  border: '1px solid var(--card-border)',
+                  outline: 'none',
+                  flexShrink: 0,
+                }}
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={handleCancelPending}
-                className="h-11 rounded-lg border text-sm font-semibold flex items-center justify-center gap-1.5"
+                className="h-10 rounded-lg border text-sm font-semibold flex items-center justify-center gap-1.5"
                 style={{ borderColor: 'var(--card-border)' }}
               >
-                <X size={16} /> Cancel
+                <X size={14} /> Cancel
               </button>
               <button
                 onClick={handleConfirmQty}
                 disabled={saving || qty.trim() === ''}
-                className="h-11 rounded-lg text-white text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
+                className="h-10 rounded-lg text-white text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-30"
                 style={{ background: 'var(--success)' }}
               >
-                <Check size={16} /> {saving ? 'Saving...' : 'Confirm'}
+                <Check size={14} /> {saving ? 'Saving...' : `Confirm ${qty || ''}`}
               </button>
             </div>
           </div>
