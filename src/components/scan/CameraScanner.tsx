@@ -9,65 +9,13 @@ interface CameraScannerProps {
   onCancel?: () => void;
 }
 
-// Consensus: require 2 identical reads within 3s before accepting
-const CONSENSUS_COUNT = 2;
-const CONSENSUS_WINDOW = 3000;
-const DEBOUNCE_MS = 2000;
-
 export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) {
   const scannerRef = useRef<HTMLDivElement>(null);
   const html5QrCodeRef = useRef<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
-
-  // Consensus tracking
-  const consensusRef = useRef<{ value: string; count: number; firstSeen: number }>({
-    value: '', count: 0, firstSeen: 0,
-  });
-  const lastAcceptedRef = useRef<string>('');
-  const lastAcceptedTimeRef = useRef<number>(0);
-
-  const onScanRef = useRef(onScan);
-  onScanRef.current = onScan;
-
-  const acceptBarcode = useCallback((decoded: string) => {
-    const now = Date.now();
-    const trimmed = decoded.trim();
-    if (!trimmed) return;
-
-    // Debounce same accepted barcode
-    if (trimmed === lastAcceptedRef.current && now - lastAcceptedTimeRef.current < DEBOUNCE_MS) {
-      return;
-    }
-
-    // Consensus: require CONSENSUS_COUNT identical reads
-    const c = consensusRef.current;
-    if (trimmed === c.value && now - c.firstSeen < CONSENSUS_WINDOW) {
-      c.count++;
-    } else {
-      consensusRef.current = { value: trimmed, count: 1, firstSeen: now };
-      return;
-    }
-
-    if (c.count >= CONSENSUS_COUNT) {
-      lastAcceptedRef.current = trimmed;
-      lastAcceptedTimeRef.current = now;
-      consensusRef.current = { value: '', count: 0, firstSeen: 0 };
-      onScanRef.current(trimmed);
-    }
-  }, []);
-
-  const stopScanner = useCallback(async () => {
-    if (html5QrCodeRef.current) {
-      try {
-        const state = html5QrCodeRef.current.getState();
-        if (state === 2) await html5QrCodeRef.current.stop();
-      } catch { /* ignore */ }
-      try { html5QrCodeRef.current.clear(); } catch { /* ignore */ }
-      html5QrCodeRef.current = null;
-      setStarted(false);
-    }
-  }, []);
+  const lastScanRef = useRef<string>('');
+  const lastScanTimeRef = useRef<number>(0);
 
   const startScanner = useCallback(async () => {
     if (!scannerRef.current || html5QrCodeRef.current) return;
@@ -76,7 +24,9 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
       const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
 
       const scannerId = 'camera-scanner-region';
-      scannerRef.current.id = scannerId;
+      if (scannerRef.current) {
+        scannerRef.current.id = scannerId;
+      }
 
       const scanner = new Html5Qrcode(scannerId, {
         formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128],
@@ -87,21 +37,28 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
       await scanner.start(
         { facingMode: 'environment' },
         {
-          fps: 15,
-          qrbox: { width: 280, height: 100 },
-          aspectRatio: 1.333,
+          fps: 10,
+          qrbox: { width: 280, height: 120 },
+          aspectRatio: 1.777,
         },
         (decodedText: string) => {
-          acceptBarcode(decodedText);
+          // Debounce: ignore same barcode within 2 seconds
+          const now = Date.now();
+          if (decodedText === lastScanRef.current && now - lastScanTimeRef.current < 2000) {
+            return;
+          }
+          lastScanRef.current = decodedText;
+          lastScanTimeRef.current = now;
+          onScan(decodedText);
         },
-        () => { /* no barcode in frame */ }
+        () => { /* ignore scan failures (no barcode in frame) */ }
       );
 
       setStarted(true);
       setError(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('Permission') || msg.includes('NotAllowed')) {
+      if (msg.includes('Permission')) {
         setError('Camera permission denied. Please allow camera access.');
       } else if (msg.includes('NotFound') || msg.includes('not found')) {
         setError('No camera found on this device.');
@@ -109,7 +66,24 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
         setError(`Camera error: ${msg}`);
       }
     }
-  }, [acceptBarcode]);
+  }, [onScan]);
+
+  const stopScanner = useCallback(async () => {
+    if (html5QrCodeRef.current) {
+      try {
+        const state = html5QrCodeRef.current.getState();
+        // State 2 = SCANNING
+        if (state === 2) {
+          await html5QrCodeRef.current.stop();
+        }
+      } catch { /* ignore */ }
+      try {
+        html5QrCodeRef.current.clear();
+      } catch { /* ignore */ }
+      html5QrCodeRef.current = null;
+      setStarted(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (active) {
@@ -117,6 +91,7 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
     } else {
       stopScanner();
     }
+
     return () => { stopScanner(); };
   }, [active, startScanner, stopScanner]);
 
@@ -134,19 +109,12 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
         </button>
       )}
 
-      {/* Html5Qrcode manages its own video inside this div */}
+      {/* Scanner viewport */}
       <div
         ref={scannerRef}
         className="w-full bg-black"
         style={{ minHeight: 200 }}
       />
-
-      {/* Mode indicator */}
-      {started && (
-        <div className="px-3 py-1 text-[10px] text-center" style={{ color: 'var(--muted)', background: 'var(--card-bg)' }}>
-          {CONSENSUS_COUNT}× verify enabled
-        </div>
-      )}
 
       {error && (
         <div className="p-3 bg-[var(--error-light)] text-[var(--error)] text-sm text-center">
