@@ -18,6 +18,7 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
   const scanLoopRef = useRef<number>(0);
   const [error, setError] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
+  const [waitingLong, setWaitingLong] = useState(false);
   const lastScanRef = useRef<string>('');
   const lastScanTimeRef = useRef<number>(0);
 
@@ -38,14 +39,31 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
 
   const startScanner = useCallback(async () => {
     try {
-      // Request high resolution for thin barcodes
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-      });
+      // Check if camera permission is already denied before attempting
+      if (navigator.permissions?.query) {
+        try {
+          const perm = await navigator.permissions.query({ name: 'camera' as PermissionName });
+          if (perm.state === 'denied') {
+            setError('Camera permission is blocked. Open your browser settings → Site Settings → Camera, and allow access for this site.');
+            return;
+          }
+        } catch { /* permissions API not supported — continue anyway */ }
+      }
+
+      // Request camera with a timeout — some devices hang if the permission prompt never appears
+      const CAMERA_TIMEOUT_MS = 10_000;
+      const stream = await Promise.race([
+        navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'environment',
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('CAMERA_TIMEOUT')), CAMERA_TIMEOUT_MS)
+        ),
+      ]);
       streamRef.current = stream;
 
       if (videoRef.current) {
@@ -107,8 +125,10 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
       scanLoopRef.current = requestAnimationFrame(scan);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('Permission') || msg.includes('NotAllowed')) {
-        setError('Camera permission denied. Please allow camera access.');
+      if (msg === 'CAMERA_TIMEOUT') {
+        setError('Camera did not start — your browser may not have asked for permission. Go to browser Settings → Site Settings → Camera and make sure this site is allowed.');
+      } else if (msg.includes('Permission') || msg.includes('NotAllowed')) {
+        setError('Camera permission denied. Go to browser Settings → Site Settings → Camera and allow access for this site.');
       } else if (msg.includes('NotFound') || msg.includes('not found')) {
         setError('No camera found on this device.');
       } else {
@@ -119,11 +139,15 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
 
   useEffect(() => {
     if (active) {
+      setWaitingLong(false);
       startScanner();
+      // After 4s, hint that something may be wrong
+      const hint = setTimeout(() => setWaitingLong(true), 4000);
+      return () => { clearTimeout(hint); stopScanner(); };
     } else {
       stopScanner();
+      return () => { stopScanner(); };
     }
-    return () => { stopScanner(); };
   }, [active, startScanner, stopScanner]);
 
   if (!active) return null;
@@ -173,6 +197,12 @@ export function CameraScanner({ active, onScan, onCancel }: CameraScannerProps) 
           <div className="text-center">
             <Camera size={24} className="mx-auto mb-2 opacity-50" />
             Starting camera...
+            {waitingLong && (
+              <p className="mt-3 text-xs text-yellow-400/80">
+                Taking longer than expected. If you see a permission prompt, please tap &quot;Allow&quot;.
+                If not, check your browser settings.
+              </p>
+            )}
           </div>
         </div>
       )}
