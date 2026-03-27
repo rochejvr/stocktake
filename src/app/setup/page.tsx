@@ -122,7 +122,7 @@ export default function SetupPage() {
 
   return (
     <AppShell>
-      <div className="p-8 max-w-3xl">
+      <div className="p-8">
         <div className="mb-8">
           <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>
             Setup Stock Take

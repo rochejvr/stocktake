@@ -148,7 +148,7 @@ export default function ExportPage() {
         )}
 
         {!loading && canExport && stats && (
-          <div className="space-y-6 fade-in max-w-4xl">
+          <div className="space-y-6 fade-in">
             {/* Header */}
             <div>
               <h1 className="text-xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>
