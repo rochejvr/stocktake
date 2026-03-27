@@ -836,13 +836,15 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
             ) : null}
           </td>
         )}
-        {/* Count: Part sub-column */}
+        {/* Count: Part sub-column (direct scans only) */}
         <td className="px-2 py-2 text-xs text-right font-mono">
-          {activeQty !== null ? (
-            <span className="font-bold">{activeDirect ?? activeQty}</span>
+          {activeDirect ? (
+            <span className="font-bold">{activeDirect}</span>
+          ) : activeQty !== null ? (
+            <span className="text-[var(--muted-light)]">—</span>
           ) : <span className="text-[var(--muted-light)]">—</span>}
         </td>
-        {/* Count: WIP sub-column */}
+        {/* Count: WIP sub-column (BOM + chain credits) */}
         <td className="px-2 py-2 text-xs text-right font-mono text-[var(--muted)]">
           {activeWip ? activeWip : ''}
         </td>
