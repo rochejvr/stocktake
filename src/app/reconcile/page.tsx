@@ -26,11 +26,8 @@ export default function ReconcilePage() {
   const [accepting, setAccepting] = useState<string | null>(null);
   const [hideZeroZero, setHideZeroZero] = useState(true);
   const [showRecountList, setShowRecountList] = useState(false);
-  const [recountItems, setRecountItems] = useState<Array<CountResult & {
-    related_wip_codes: Array<{ wip_code: string; notes: string | null; count1_qty: number }>;
-    related_chain_codes: string[];
-    is_chain_parent?: boolean;
-  }>>([]);
+  const [recountParts, setRecountParts] = useState<Array<CountResult & { is_chain_parent?: boolean }>>([]);
+  const [recountWips, setRecountWips] = useState<Array<{ part_number: string; description: string; store_code: string; pastel_qty: number; count1_qty: number | null; count2_qty: number | null }>>([]);
   const [recountSelection, setRecountSelection] = useState<Set<string>>(new Set());
   const [loadingRecount, setLoadingRecount] = useState(false);
   // Per-row count selection: which count to show (1 or 2). Only rows with count2 can be toggled.
@@ -260,9 +257,15 @@ export default function ReconcilePage() {
     try {
       const res = await fetch(`/api/count-results/recount-list?stockTakeId=${stockTake.id}`);
       const data = await res.json();
-      if (Array.isArray(data)) {
-        setRecountItems(data);
-        setRecountSelection(new Set(data.map((r: CountResult) => r.id)));
+      if (data.parts) {
+        setRecountParts(data.parts);
+        setRecountWips(data.wips || []);
+        // Select all parts by default, WIPs use wip_code|store as ID
+        const allIds = new Set([
+          ...data.parts.map((r: CountResult) => r.id),
+          ...((data.wips || []) as Array<{ part_number: string; store_code: string }>).map((w) => `wip_${w.part_number}|${w.store_code}`),
+        ]);
+        setRecountSelection(allIds);
         setShowRecountList(true);
       }
     } catch { /* ignore */ }
@@ -278,17 +281,18 @@ export default function ReconcilePage() {
     });
   };
 
+  const allRecountIds = [
+    ...recountParts.map(r => r.id),
+    ...recountWips.map(w => `wip_${w.part_number}|${w.store_code}`),
+  ];
+
   const handleSelectAllRecount = (selectAll: boolean) => {
-    if (selectAll) {
-      setRecountSelection(new Set(recountItems.map(r => r.id)));
-    } else {
-      setRecountSelection(new Set());
-    }
+    setRecountSelection(selectAll ? new Set(allRecountIds) : new Set());
   };
 
   const handleSaveRecountSelection = async () => {
     if (!stockTake) return;
-    for (const item of recountItems) {
+    for (const item of recountParts) {
       const shouldFlag = recountSelection.has(item.id);
       if (shouldFlag !== item.recount_flagged) {
         await fetch(`/api/count-results/${item.id}`, {
@@ -306,49 +310,47 @@ export default function ReconcilePage() {
   };
 
   const handlePrintRecountList = () => {
-    const selected = recountItems.filter(r => recountSelection.has(r.id));
+    const selectedParts = recountParts.filter(r => recountSelection.has(r.id));
+    const selectedWips = recountWips.filter(w => recountSelection.has(`wip_${w.part_number}|${w.store_code}`));
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
-    const allWipCodes = new Set<string>();
-    const rows: string[] = [];
-
-    for (const item of selected) {
-      const wipCodes = item.related_wip_codes.map(w => {
-        const active = w.count1_qty > 0;
-        return `<div style="${active ? 'font-weight:bold' : 'color:#999'}">${w.wip_code}</div>`;
-      });
-      wipCodes.forEach(() => {}); // just for WIP codes display
+    const td = 'padding:4px 8px;border:1px solid #ddd';
+    const partRows = selectedParts.map(item => {
       const lastCount = item.count2_qty ?? item.count1_qty;
-      const reasonBadge = item.is_chain_parent
-        ? '<span style="background:#dbeafe;color:#1d4ed8;padding:1px 6px;border-radius:8px;font-size:10px">Chain parent</span>'
-        : (item.recount_reasons || []).map((r: string) => `<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px">${REASON_LABELS[r]?.split(' ').slice(0, 3).join(' ') || r}</span>`).join(' ');
+      return `<tr>
+        <td style="${td};font-family:monospace">${item.part_number}</td>
+        <td style="${td}">${item.description}</td>
+        <td style="${td}">${STORE_LABELS[item.store_code] || item.store_code}</td>
+        <td style="${td};text-align:right">${lastCount ?? '—'}</td>
+        <td style="${td}"></td>
+      </tr>`;
+    }).join('');
 
-      rows.push(`<tr>
-        <td style="padding:4px 8px;border:1px solid #ddd;font-family:monospace">${item.part_number}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd">${item.description}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd">${STORE_LABELS[item.store_code] || item.store_code}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd;text-align:right">${lastCount ?? '—'}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd">${reasonBadge}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd;font-family:monospace;font-size:11px">${wipCodes.length > 0 ? wipCodes.join('') : '—'}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd"></td>
-      </tr>`);
-    }
+    const wipRows = selectedWips.map(w => {
+      const lastCount = w.count2_qty ?? w.count1_qty;
+      return `<tr>
+        <td style="${td};font-family:monospace">${w.part_number}</td>
+        <td style="${td}">${w.description || ''}</td>
+        <td style="${td}">${STORE_LABELS[w.store_code] || w.store_code}</td>
+        <td style="${td};text-align:right">${lastCount ?? '—'}</td>
+        <td style="${td}"></td>
+      </tr>`;
+    }).join('');
+
+    const tableHead = `<thead><tr>
+      <th>Code</th><th>Description</th><th>Store</th>
+      <th style="text-align:right">Last Count</th><th>New Count</th>
+    </tr></thead>`;
 
     printWindow.document.write(`<!DOCTYPE html><html><head><title>Recount List — ${stockTake?.reference}</title>
-      <style>body{font-family:Arial,sans-serif;padding:20px}table{border-collapse:collapse;width:100%}th{background:#f5f5f5;padding:6px 8px;border:1px solid #ddd;text-align:left;font-size:11px;text-transform:uppercase}td{font-size:12px;vertical-align:top}@media print{body{padding:0}}</style>
+      <style>body{font-family:Arial,sans-serif;padding:20px}table{border-collapse:collapse;width:100%;margin-bottom:24px}th{background:#f5f5f5;padding:6px 8px;border:1px solid #ddd;text-align:left;font-size:11px;text-transform:uppercase}td{font-size:12px;vertical-align:top}h3{margin:16px 0 4px;color:#333}@media print{body{padding:0}}</style>
     </head><body>
       <h2 style="margin-bottom:4px">Recount List</h2>
-      <p style="color:#666;margin-top:0">${stockTake?.reference} — ${stockTake?.name} — ${new Date().toLocaleDateString()}</p>
-      <p style="color:#666;font-size:12px">${selected.length} items to recount</p>
-      <table>
-        <thead><tr>
-          <th>Part Number</th><th>Description</th><th>Store</th>
-          <th style="text-align:right">Last Count</th>
-          <th>Reasons</th><th>Related WIP Codes</th><th>New Count</th>
-        </tr></thead>
-        <tbody>${rows.join('')}</tbody>
-      </table>
+      <p style="color:#666;margin-top:0">${stockTake?.reference} — ${new Date().toLocaleDateString()}</p>
+      <h3>Parts (${selectedParts.length})</h3>
+      <table>${tableHead}<tbody>${partRows}</tbody></table>
+      ${selectedWips.length > 0 ? `<h3>WIPs (${selectedWips.length})</h3><table>${tableHead}<tbody>${wipRows}</tbody></table>` : ''}
     </body></html>`);
     printWindow.document.close();
     printWindow.print();
@@ -427,15 +429,15 @@ export default function ReconcilePage() {
                       Recount List
                     </h2>
                     <p className="text-xs text-[var(--muted)]">
-                      {recountSelection.size} of {recountItems.length} items selected for recount
+                      {recountSelection.size} of {allRecountIds.length} items selected for recount
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => handleSelectAllRecount(recountSelection.size < recountItems.length)}
+                      onClick={() => handleSelectAllRecount(recountSelection.size < allRecountIds.length)}
                       className="text-xs text-[var(--primary)] font-medium hover:underline"
                     >
-                      {recountSelection.size === recountItems.length ? 'Deselect All' : 'Select All'}
+                      {recountSelection.size === allRecountIds.length ? 'Deselect All' : 'Select All'}
                     </button>
                     <button
                       onClick={handlePrintRecountList}
@@ -461,7 +463,11 @@ export default function ReconcilePage() {
                     </button>
                   </div>
                 </div>
-                <div className="max-h-[400px] overflow-y-auto">
+                <div className="max-h-[500px] overflow-y-auto">
+                  {/* Parts section */}
+                  <div className="px-4 py-1.5 bg-slate-50 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider border-b" style={{ borderColor: 'var(--card-border)' }}>
+                    Parts ({recountParts.length})
+                  </div>
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b" style={{ borderColor: 'var(--card-border)' }}>
@@ -471,62 +477,80 @@ export default function ReconcilePage() {
                         <th className="text-left px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Store</th>
                         <th className="text-right px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Last Count</th>
                         <th className="text-left px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Reasons</th>
-                        <th className="text-left px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Related WIP Codes</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {recountItems.map(item => {
-                        return (
-                          <tr
-                            key={item.id}
-                            className="border-b hover:bg-slate-50 transition-colors"
-                            style={{ borderColor: 'var(--card-border)', opacity: recountSelection.has(item.id) ? 1 : 0.4 }}
-                          >
-                            <td className="text-center px-2 py-2">
-                              <input
-                                type="checkbox"
-                                checked={recountSelection.has(item.id)}
-                                onChange={() => handleToggleRecountItem(item.id)}
-                                className="cursor-pointer"
-                              />
-                            </td>
-                            <td className="px-2 py-2 font-mono font-medium">{item.part_number}</td>
-                            <td className="px-2 py-2 text-[var(--muted)]">{item.description}</td>
-                            <td className="px-2 py-2 text-[var(--muted)]">{STORE_LABELS[item.store_code] || item.store_code}</td>
-                            <td className="px-2 py-2 text-right font-mono">{item.count2_qty ?? item.count1_qty ?? '—'}</td>
-                            <td className="px-2 py-2">
-                              <div className="flex flex-wrap gap-1">
-                                {item.is_chain_parent && (
-                                  <span className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-full">
-                                    Chain parent
-                                  </span>
-                                )}
-                                {item.recount_reasons?.map(r => (
-                                  <span key={r} className="text-[9px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-full">
-                                    {REASON_LABELS[r]?.split(' ').slice(0, 3).join(' ') || r}
-                                  </span>
-                                ))}
-                              </div>
-                            </td>
-                            <td className="px-2 py-2 font-mono text-[11px]">
-                              {item.related_wip_codes.length > 0 ? (
-                                <div className="flex flex-col gap-0.5">
-                                  {item.related_wip_codes.map(w => {
-                                    const active = w.count1_qty > 0;
-                                    return (
-                                      <div key={w.wip_code} className={active ? 'font-bold text-[var(--foreground)]' : 'text-[var(--muted)]'}>
-                                        {w.wip_code}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              ) : '—'}
-                            </td>
-                          </tr>
-                        );
-                      })}
+                      {recountParts.map(item => (
+                        <tr
+                          key={item.id}
+                          className="border-b hover:bg-slate-50 transition-colors"
+                          style={{ borderColor: 'var(--card-border)', opacity: recountSelection.has(item.id) ? 1 : 0.4 }}
+                        >
+                          <td className="text-center px-2 py-2">
+                            <input type="checkbox" checked={recountSelection.has(item.id)}
+                              onChange={() => handleToggleRecountItem(item.id)} className="cursor-pointer" />
+                          </td>
+                          <td className="px-2 py-2 font-mono font-medium">{item.part_number}</td>
+                          <td className="px-2 py-2 text-[var(--muted)]">{item.description}</td>
+                          <td className="px-2 py-2 text-[var(--muted)]">{STORE_LABELS[item.store_code] || item.store_code}</td>
+                          <td className="px-2 py-2 text-right font-mono">{item.count2_qty ?? item.count1_qty ?? '—'}</td>
+                          <td className="px-2 py-2">
+                            <div className="flex flex-wrap gap-1">
+                              {item.is_chain_parent && (
+                                <span className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-full">Chain parent</span>
+                              )}
+                              {item.recount_reasons?.map((r: string) => (
+                                <span key={r} className="text-[9px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-full">
+                                  {REASON_LABELS[r]?.split(' ').slice(0, 3).join(' ') || r}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
+
+                  {/* WIPs section */}
+                  {recountWips.length > 0 && (
+                    <>
+                      <div className="px-4 py-1.5 bg-slate-50 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider border-b border-t" style={{ borderColor: 'var(--card-border)' }}>
+                        WIPs ({recountWips.length})
+                      </div>
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b" style={{ borderColor: 'var(--card-border)' }}>
+                            <th className="text-center px-2 py-2 w-8"></th>
+                            <th className="text-left px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">WIP Code</th>
+                            <th className="text-left px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Description</th>
+                            <th className="text-left px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Store</th>
+                            <th className="text-right px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Last Count</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {recountWips.map(w => {
+                            const wipId = `wip_${w.part_number}|${w.store_code}`;
+                            return (
+                              <tr
+                                key={wipId}
+                                className="border-b hover:bg-slate-50 transition-colors"
+                                style={{ borderColor: 'var(--card-border)', opacity: recountSelection.has(wipId) ? 1 : 0.4 }}
+                              >
+                                <td className="text-center px-2 py-2">
+                                  <input type="checkbox" checked={recountSelection.has(wipId)}
+                                    onChange={() => handleToggleRecountItem(wipId)} className="cursor-pointer" />
+                                </td>
+                                <td className="px-2 py-2 font-mono font-medium">{w.part_number}</td>
+                                <td className="px-2 py-2 text-[var(--muted)]">{w.description || ''}</td>
+                                <td className="px-2 py-2 text-[var(--muted)]">{STORE_LABELS[w.store_code] || w.store_code}</td>
+                                <td className="px-2 py-2 text-right font-mono">{w.count2_qty ?? w.count1_qty ?? '—'}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </>
+                  )}
                 </div>
               </div>
             )}
