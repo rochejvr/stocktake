@@ -476,11 +476,6 @@ export default function ReconcilePage() {
                     </thead>
                     <tbody>
                       {recountItems.map(item => {
-                        const allRelated = [
-                          ...item.related_wip_codes.map(w => w.wip_code),
-                          ...item.related_chain_codes,
-                        ];
-                        const uniqueRelated = [...new Set(allRelated)];
                         return (
                           <tr
                             key={item.id}
@@ -514,7 +509,7 @@ export default function ReconcilePage() {
                               </div>
                             </td>
                             <td className="px-2 py-2 font-mono text-[11px]">
-                              {uniqueRelated.length > 0 ? (
+                              {item.related_wip_codes.length > 0 ? (
                                 <div className="flex flex-col gap-0.5">
                                   {item.related_wip_codes.map(w => {
                                     const active = w.count1_qty > 0;
@@ -524,9 +519,6 @@ export default function ReconcilePage() {
                                       </div>
                                     );
                                   })}
-                                  {item.related_chain_codes.map(c => (
-                                    <div key={c} className="text-[var(--muted)]">{c}</div>
-                                  ))}
                                 </div>
                               ) : '—'}
                             </td>
