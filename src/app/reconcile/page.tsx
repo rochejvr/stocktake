@@ -29,6 +29,7 @@ export default function ReconcilePage() {
   const [recountItems, setRecountItems] = useState<Array<CountResult & {
     related_wip_codes: Array<{ wip_code: string; notes: string | null; count1_qty: number }>;
     related_chain_codes: string[];
+    is_chain_parent?: boolean;
   }>>([]);
   const [recountSelection, setRecountSelection] = useState<Set<string>>(new Set());
   const [loadingRecount, setLoadingRecount] = useState(false);
@@ -503,7 +504,12 @@ export default function ReconcilePage() {
                             </td>
                             <td className="px-2 py-2">
                               <div className="flex flex-wrap gap-1">
-                                {item.recount_reasons.map(r => (
+                                {item.is_chain_parent && (
+                                  <span className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-full">
+                                    Chain parent
+                                  </span>
+                                )}
+                                {item.recount_reasons?.map(r => (
                                   <span key={r} className="text-[9px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-full">
                                     {REASON_LABELS[r]?.split(' ').slice(0, 3).join(' ') || r}
                                   </span>

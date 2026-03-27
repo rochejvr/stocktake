@@ -55,8 +55,44 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Get count1 quantities for related WIP codes so UI can bold active ones
-  const allWipCodes = [...new Set(Object.values(wipLookup).flatMap(wips => wips.map(w => w.wip_code)))];
+  // Collect chain parent codes that need their own rows
+  const chainParentCodes = [...new Set(Object.values(chainLookup).flat())];
+  const flaggedPartSet = new Set(partNumbers);
+  // Only add parents that aren't already flagged
+  const newParentCodes = chainParentCodes.filter(c => !flaggedPartSet.has(c));
+
+  // Get count_results for chain parents so they appear as full rows
+  let chainParentRows: typeof flagged = [];
+  if (newParentCodes.length > 0) {
+    const { data: parentResults } = await supabase
+      .from('count_results')
+      .select('*')
+      .eq('stock_take_id', stockTakeId)
+      .in('part_number', newParentCodes);
+    chainParentRows = parentResults || [];
+  }
+
+  // Get BOM mappings for chain parents too (they have their own WIPs)
+  if (newParentCodes.length > 0) {
+    const { data: parentBom } = await supabase
+      .from('bom_mappings')
+      .select('wip_code, component_code, notes')
+      .in('component_code', newParentCodes);
+    if (parentBom) {
+      for (const bom of parentBom) {
+        if (!wipLookup[bom.component_code]) wipLookup[bom.component_code] = [];
+        if (!wipLookup[bom.component_code].some(w => w.wip_code === bom.wip_code)) {
+          wipLookup[bom.component_code].push({ wip_code: bom.wip_code, notes: bom.notes });
+        }
+      }
+    }
+  }
+
+  // Collect ALL WIP codes (from flagged + chain parents) for activity lookup
+  const allItems = [...flagged, ...chainParentRows];
+  const allWipCodes = [...new Set(
+    allItems.flatMap(r => (wipLookup[r.part_number] || []).map(w => w.wip_code))
+  )];
   const wipCounts: Record<string, number> = {};
   if (allWipCodes.length > 0) {
     const { data: wipResults } = await supabase
@@ -66,22 +102,27 @@ export async function GET(request: NextRequest) {
       .in('part_number', allWipCodes);
     if (wipResults) {
       for (const wr of wipResults) {
-        // Sum across stores — use max of count1 or count2 to detect activity
         const counted = Math.max(wr.count1_qty ?? 0, wr.count2_qty ?? 0);
         wipCounts[wr.part_number] = (wipCounts[wr.part_number] || 0) + counted;
       }
     }
   }
 
-  // Enrich flagged items with WIP codes + their count1 qty
-  const enriched = flagged.map(r => ({
+  // Build enriched list: flagged items + chain parent items
+  const enrich = (r: typeof flagged[0], isChainParent = false) => ({
     ...r,
     related_wip_codes: (wipLookup[r.part_number] || []).map(w => ({
       ...w,
       count1_qty: wipCounts[w.wip_code] ?? 0,
     })),
     related_chain_codes: chainLookup[r.part_number] || [],
-  }));
+    is_chain_parent: isChainParent,
+  });
+
+  const enriched = [
+    ...flagged.map(r => enrich(r, false)),
+    ...chainParentRows.map(r => enrich(r, true)),
+  ];
 
   return NextResponse.json(enriched);
 }
