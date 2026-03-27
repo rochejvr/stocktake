@@ -49,6 +49,16 @@ export default function BomPage() {
 
   const selectedComponents = selectedWip ? (grouped[selectedWip] || []) : [];
 
+  // All unique codes for searchable dropdowns (WIP codes + component codes)
+  const allCodes = useMemo(() => {
+    const codes = new Set<string>();
+    for (const m of mappings) {
+      codes.add(m.wip_code);
+      codes.add(m.component_code);
+    }
+    return [...codes].sort();
+  }, [mappings]);
+
   // Optimistic update helpers
   const handleSaveMapping = useCallback(async (id: string, data: Partial<BomMapping>) => {
     const res = await fetch(`/api/bom/mappings/${id}`, {
@@ -203,6 +213,7 @@ export default function BomPage() {
               {showAddChain && (
                 <div className="p-4 border-b" style={{ borderColor: 'var(--card-border)', background: 'rgba(37,99,235,0.03)' }}>
                   <AddChainForm
+                    allCodes={allCodes}
                     onSave={async (data) => {
                       const res = await fetch('/api/bom/chains', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
@@ -261,22 +272,35 @@ export default function BomPage() {
 
 // ── Inline sub-components ───────────────────────────────────────────────────
 
-function AddChainForm({ onSave, onCancel }: {
-  onSave: (data: { scanned_code: string; also_credit_code: string; notes?: string }) => void;
+function AddChainForm({ onSave, onCancel, allCodes }: {
+  onSave: (data: { scanned_code: string; also_credit_code: string; notes?: string }) => Promise<void>;
   onCancel: () => void;
+  allCodes: string[];
 }) {
   const [scanned, setScanned] = useState('');
   const [credit, setCredit]   = useState('');
   const [notes, setNotes]     = useState('');
+  const [saving, setSaving]   = useState(false);
+
+  const handleSave = async () => {
+    if (!scanned || !credit) return;
+    setSaving(true);
+    try {
+      await onSave({ scanned_code: scanned, also_credit_code: credit, notes: notes || undefined });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="grid grid-cols-3 gap-3 items-end">
       <div>
         <label className="text-[10px] font-semibold text-[var(--muted)] block mb-1" style={{ fontFamily: 'var(--font-display)' }}>When Scanned</label>
-        <input className="input font-mono text-xs" placeholder="XM400-16B01" value={scanned} onChange={e => setScanned(e.target.value)} />
+        <SearchableCodeInput codes={allCodes} value={scanned} onChange={setScanned} placeholder="Search item code..." />
       </div>
       <div>
         <label className="text-[10px] font-semibold text-[var(--muted)] block mb-1" style={{ fontFamily: 'var(--font-display)' }}>Also Credit</label>
-        <input className="input font-mono text-xs" placeholder="XM400-16A01" value={credit} onChange={e => setCredit(e.target.value)} />
+        <SearchableCodeInput codes={allCodes} value={credit} onChange={setCredit} placeholder="Search item code..." />
       </div>
       <div>
         <label className="text-[10px] font-semibold text-[var(--muted)] block mb-1" style={{ fontFamily: 'var(--font-display)' }}>Notes</label>
@@ -284,14 +308,63 @@ function AddChainForm({ onSave, onCancel }: {
       </div>
       <div className="col-span-3 flex gap-2">
         <button className="btn-primary text-xs py-1.5"
-          onClick={() => onSave({ scanned_code: scanned, also_credit_code: credit, notes: notes || undefined })}
-          disabled={!scanned || !credit}>
-          <Check size={12} /> Save
+          onClick={handleSave}
+          disabled={!scanned || !credit || saving}>
+          {saving ? <Loader size={12} className="animate-spin" /> : <Check size={12} />} {saving ? 'Saving...' : 'Save'}
         </button>
-        <button className="btn-secondary text-xs py-1.5" onClick={onCancel}>
+        <button className="btn-secondary text-xs py-1.5" onClick={onCancel} disabled={saving}>
           <X size={12} /> Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+function SearchableCodeInput({ codes, value, onChange, placeholder }: {
+  codes: string[];
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = (search || value).toLowerCase();
+    if (!q) return codes.slice(0, 50);
+    return codes.filter(c => c.toLowerCase().includes(q)).slice(0, 50);
+  }, [codes, search, value]);
+
+  return (
+    <div className="relative">
+      <input
+        className="input font-mono text-xs w-full"
+        placeholder={placeholder}
+        value={search || value}
+        onChange={e => { setSearch(e.target.value); onChange(''); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
+      />
+      {open && filtered.length > 0 && (
+        <div
+          className="absolute z-20 left-0 right-0 mt-1 rounded-lg border shadow-lg overflow-y-auto"
+          style={{ background: 'var(--card)', borderColor: 'var(--card-border)', maxHeight: 200 }}
+        >
+          {filtered.map(code => (
+            <button
+              key={code}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono hover:bg-[var(--background)] transition-colors"
+              style={{ color: code === value ? 'var(--primary)' : 'var(--foreground)' }}
+              onMouseDown={() => { onChange(code); setSearch(''); setOpen(false); }}
+            >
+              {code}
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <div className="px-3 py-2 text-xs text-[var(--muted)]">No matches</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
