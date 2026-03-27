@@ -71,6 +71,11 @@ export default function BomPage() {
     [catalog],
   );
 
+  const descFor = useCallback((code: string) =>
+    catalogItems.find(i => i.code === code)?.description || '',
+    [catalogItems],
+  );
+
   // Optimistic update helpers
   const handleSaveMapping = useCallback(async (id: string, data: Partial<BomMapping>) => {
     const res = await fetch(`/api/bom/mappings/${id}`, {
@@ -208,59 +213,53 @@ export default function BomPage() {
           </div>
         </div>
 
-        {/* Component Chains — collapsible */}
+        {/* Component Chains */}
         <div className="card">
-          <button
-            onClick={() => setShowChains(!showChains)}
-            className="w-full px-4 py-3 flex items-center gap-2 text-left hover:bg-[var(--background-raised)] transition-colors"
-          >
-            {showChains ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            <Link2 size={14} style={{ color: 'var(--primary)' }} />
-            <span className="text-sm font-semibold">Component Chains</span>
-            <span className="badge badge-slate">{groupedChains.length}</span>
-          </button>
+          <div className="px-4 py-3 flex items-center justify-between border-b" style={{ borderColor: 'var(--card-border)' }}>
+            <button onClick={() => setShowChains(!showChains)} className="flex items-center gap-2 hover:opacity-80">
+              {showChains ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              <Link2 size={14} style={{ color: 'var(--primary)' }} />
+              <span className="text-sm font-semibold">Component Chains</span>
+              <span className="badge badge-slate">{groupedChains.length}</span>
+            </button>
+            {showChains && !showAddChain && (
+              <button onClick={() => setShowAddChain(true)} className="btn-primary text-xs py-1 px-3">
+                <Plus size={12} /> New Chain
+              </button>
+            )}
+          </div>
 
           {showChains && (
-            <div className="border-t" style={{ borderColor: 'var(--card-border)' }}>
+            <div>
               {showAddChain && (
-                <div className="p-4 border-b" style={{ borderColor: 'var(--card-border)', background: 'rgba(37,99,235,0.03)' }}>
-                  <AddChainForm
-                    catalogItems={catalogItems}
-                    onSave={async (data) => {
-                      for (const credit of data.credits) {
-                        await fetch('/api/bom/chains', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ scanned_code: data.scanned_code, also_credit_code: credit.code, credit_qty: credit.qty, notes: data.notes }),
-                        });
-                      }
-                      await load();
-                      setShowAddChain(false);
-                    }}
-                    onCancel={() => setShowAddChain(false)}
-                  />
-                </div>
+                <AddChainForm
+                  catalogItems={catalogItems}
+                  descFor={descFor}
+                  onSave={async (data) => {
+                    for (const credit of data.credits) {
+                      await fetch('/api/bom/chains', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ scanned_code: data.scanned_code, also_credit_code: credit.code, credit_qty: credit.qty, notes: data.notes }),
+                      });
+                    }
+                    await load();
+                    setShowAddChain(false);
+                  }}
+                  onCancel={() => setShowAddChain(false)}
+                />
               )}
 
-              {/* Contextual action bar */}
-              <div className="px-4 py-2 flex justify-end border-b" style={{ borderColor: 'var(--card-border-light)' }}>
-                {!showAddChain ? (
-                  <button onClick={() => setShowAddChain(true)} className="btn-primary text-xs py-1 px-3">
-                    <Plus size={12} /> Add Chain
-                  </button>
-                ) : (
-                  <span className="text-[10px] text-[var(--muted)] italic">Fill in the form above and click Save</span>
-                )}
-              </div>
-
-              {groupedChains.length === 0 ? (
-                <div className="py-8 text-center text-xs text-[var(--muted)]">
-                  No component chains configured
+              {groupedChains.length === 0 && !showAddChain ? (
+                <div className="py-10 text-center">
+                  <Link2 size={24} className="mx-auto mb-2 opacity-15" />
+                  <div className="text-xs text-[var(--muted)]">No component chains configured</div>
                 </div>
               ) : (
-                <ChainTable
+                <ChainAccordion
                   groupedChains={groupedChains}
                   catalogItems={catalogItems}
+                  descFor={descFor}
                   onDelete={handleDeleteChain}
                   onUpdate={async (id, data) => {
                     const res = await fetch(`/api/bom/chains/${id}`, {
@@ -270,7 +269,7 @@ export default function BomPage() {
                     });
                     if (res.ok) await load();
                   }}
-                  onAddCredit={async (scannedCode, creditCode, notes, creditQty) => {
+                  onAddCredit={async (scannedCode, creditCode, creditQty, notes) => {
                     const res = await fetch('/api/bom/chains', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
@@ -290,196 +289,224 @@ export default function BomPage() {
 
 // ── Inline sub-components ───────────────────────────────────────────────────
 
-function AddChainForm({ onSave, onCancel, catalogItems }: {
+// ── Add Chain Form ─────────────────────────────────────────────────────────
+function AddChainForm({ onSave, onCancel, catalogItems, descFor }: {
   onSave: (data: { scanned_code: string; credits: { code: string; qty: number }[]; notes?: string }) => Promise<void>;
   onCancel: () => void;
   catalogItems: { code: string; description: string }[];
+  descFor: (code: string) => string;
 }) {
   const [scanned, setScanned] = useState('');
   const [credits, setCredits] = useState<{ code: string; qty: number }[]>([{ code: '', qty: 1 }]);
-  const [notes, setNotes]     = useState('');
-  const [saving, setSaving]   = useState(false);
-
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
   const validCredits = credits.filter(c => c.code.trim());
   const canSave = scanned && validCredits.length > 0;
 
-  const handleSave = async () => {
-    if (!canSave) return;
-    setSaving(true);
-    try {
-      await onSave({ scanned_code: scanned, credits: validCredits, notes: notes || undefined });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const updateCreditCode = (idx: number, val: string) => {
-    setCredits(prev => prev.map((c, i) => i === idx ? { ...c, code: val } : c));
-  };
-  const updateCreditQty = (idx: number, val: number) => {
-    setCredits(prev => prev.map((c, i) => i === idx ? { ...c, qty: val } : c));
-  };
-  const addCreditRow = () => setCredits(prev => [...prev, { code: '', qty: 1 }]);
-  const removeCreditRow = (idx: number) => setCredits(prev => prev.filter((_, i) => i !== idx));
-
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-[10px] font-semibold text-[var(--muted)] block mb-1" style={{ fontFamily: 'var(--font-display)' }}>When Scanned</label>
+    <div className="p-4 border-b" style={{ borderColor: 'var(--card-border)', background: 'var(--background)' }}>
+      <div className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider mb-3">New Chain</div>
+
+      {/* Scanned product */}
+      <div className="mb-3">
+        <label className="text-[10px] font-medium text-[var(--muted)] mb-1 block">When this product is scanned</label>
+        <div className="max-w-xs">
           <SearchableCodeInput items={catalogItems} value={scanned} onChange={setScanned} placeholder="Search product code..." />
         </div>
-        <div>
-          <label className="text-[10px] font-semibold text-[var(--muted)] block mb-1" style={{ fontFamily: 'var(--font-display)' }}>Notes</label>
-          <input className="input text-xs" placeholder="Optional" value={notes} onChange={e => setNotes(e.target.value)} />
-        </div>
+        {scanned && <div className="text-[10px] text-[var(--muted)] mt-0.5 ml-0.5">{descFor(scanned)}</div>}
       </div>
 
-      <div>
-        <div className="flex items-end gap-2 mb-1">
-          <label className="flex-1 text-[10px] font-semibold text-[var(--muted)]" style={{ fontFamily: 'var(--font-display)' }}>Also Credit</label>
-          <label className="w-20 text-[10px] font-semibold text-[var(--muted)] text-center" style={{ fontFamily: 'var(--font-display)' }}>Qty</label>
-          <div className="w-7" />
-        </div>
-        <div className="space-y-1.5">
+      {/* Credit items */}
+      <div className="mb-3">
+        <label className="text-[10px] font-medium text-[var(--muted)] mb-2 block">Also credit these products</label>
+        <div className="space-y-2">
           {credits.map((credit, idx) => (
-            <div key={idx} className="flex items-center gap-2">
-              <div className="flex-1">
-                <SearchableCodeInput items={catalogItems} value={credit.code} onChange={v => updateCreditCode(idx, v)} placeholder="Search product code..." />
+            <div key={idx} className="flex items-start gap-3 p-2.5 rounded-lg border" style={{ borderColor: 'var(--card-border)', background: 'var(--card)' }}>
+              <div className="flex-1 min-w-0">
+                <div className="max-w-xs">
+                  <SearchableCodeInput items={catalogItems} value={credit.code} onChange={v => setCredits(prev => prev.map((c, i) => i === idx ? { ...c, code: v } : c))} placeholder="Search product code..." />
+                </div>
+                {credit.code && <div className="text-[10px] text-[var(--muted)] mt-0.5 ml-0.5">{descFor(credit.code)}</div>}
               </div>
-              <div className="w-20">
-                <input
-                  type="number"
-                  className="input font-mono text-xs text-center w-full"
-                  value={credit.qty}
-                  onChange={e => updateCreditQty(idx, parseFloat(e.target.value) || 1)}
-                  min={0.01}
-                  step="any"
-                  title="Qty per scan"
-                />
+              <div className="shrink-0 text-center">
+                <label className="text-[9px] text-[var(--muted)] block mb-0.5">Qty</label>
+                <input type="number" className="input font-mono text-xs text-center" style={{ width: 48 }}
+                  value={credit.qty} onChange={e => setCredits(prev => prev.map((c, i) => i === idx ? { ...c, qty: parseFloat(e.target.value) || 1 } : c))}
+                  min={0.01} step="any" />
               </div>
               {credits.length > 1 && (
-                <button onClick={() => removeCreditRow(idx)} className="p-1.5 rounded hover:bg-red-50 text-[var(--muted-light)] hover:text-[var(--error)] transition-colors">
-                  <X size={13} />
+                <button onClick={() => setCredits(prev => prev.filter((_, i) => i !== idx))}
+                  className="p-1 mt-3 rounded hover:bg-red-50 text-[var(--muted-light)] hover:text-[var(--error)] transition-colors shrink-0">
+                  <Trash2 size={12} />
                 </button>
               )}
             </div>
           ))}
-          <button onClick={addCreditRow} className="text-[10px] text-[var(--primary)] font-medium flex items-center gap-1 hover:underline">
-            <Plus size={10} /> Add another credit code
+          <button onClick={() => setCredits(prev => [...prev, { code: '', qty: 1 }])}
+            className="text-[10px] text-[var(--primary)] font-medium flex items-center gap-1 hover:underline ml-1">
+            <Plus size={10} /> Add another product
           </button>
         </div>
       </div>
 
-      <div className="flex gap-2 pt-1">
-        <button className="btn-primary text-xs py-1.5" onClick={handleSave} disabled={!canSave || saving}>
-          {saving ? <Loader size={12} className="animate-spin" /> : <Check size={12} />} {saving ? 'Saving...' : 'Save Chain'}
+      {/* Notes */}
+      <div className="mb-4 max-w-sm">
+        <label className="text-[10px] font-medium text-[var(--muted)] mb-1 block">Notes (optional)</label>
+        <input className="input text-xs" placeholder="e.g. Pack of 10 electrodes" value={notes} onChange={e => setNotes(e.target.value)} />
+      </div>
+
+      {/* Actions */}
+      <div className="flex gap-2">
+        <button className="btn-primary text-xs py-1.5 px-4" disabled={!canSave || saving}
+          onClick={async () => { setSaving(true); try { await onSave({ scanned_code: scanned, credits: validCredits, notes: notes || undefined }); } finally { setSaving(false); } }}>
+          {saving ? <Loader size={12} className="animate-spin" /> : <Check size={12} />}
+          {saving ? 'Saving...' : 'Save Chain'}
         </button>
-        <button className="btn-secondary text-xs py-1.5" onClick={onCancel} disabled={saving}>
-          <X size={12} /> Cancel
-        </button>
+        <button className="btn-secondary text-xs py-1.5 px-4" onClick={onCancel} disabled={saving}>Cancel</button>
       </div>
     </div>
   );
 }
 
-function ChainTable({ groupedChains, catalogItems, onDelete, onUpdate, onAddCredit }: {
+// ── Chain Accordion ───────────────────────────────────────────────────────
+function ChainAccordion({ groupedChains, catalogItems, descFor, onDelete, onUpdate, onAddCredit }: {
   groupedChains: [string, ComponentChain[]][];
   catalogItems: { code: string; description: string }[];
+  descFor: (code: string) => string;
   onDelete: (id: string) => void;
   onUpdate: (id: string, data: Partial<ComponentChain>) => Promise<void>;
-  onAddCredit: (scannedCode: string, creditCode: string, notes?: string, creditQty?: number) => Promise<void>;
+  onAddCredit: (scannedCode: string, creditCode: string, creditQty: number, notes?: string) => Promise<void>;
 }) {
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editCode, setEditCode] = useState('');
-  const [editQty, setEditQty] = useState(1);
-  const [editNotes, setEditNotes] = useState('');
-  const [addingTo, setAddingTo] = useState<string | null>(null);
-  const [newCredit, setNewCredit] = useState('');
-  const [newCreditQty, setNewCreditQty] = useState(1);
-
   const [openCode, setOpenCode] = useState<string | null>(null);
-  const descFor = (code: string) => catalogItems.find(i => i.code === code)?.description || '';
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editState, setEditState] = useState({ code: '', qty: 1, notes: '' });
+  const [addingTo, setAddingTo] = useState<string | null>(null);
+  const [addState, setAddState] = useState({ code: '', qty: 1 });
 
   const toggle = (code: string) => {
-    setOpenCode(openCode === code ? null : code);
+    setOpenCode(prev => prev === code ? null : code);
     setEditingId(null);
     setAddingTo(null);
   };
 
+  const startEdit = (c: ComponentChain) => {
+    setEditingId(c.id);
+    setEditState({ code: c.also_credit_code, qty: c.credit_qty ?? 1, notes: c.notes || '' });
+  };
+
   return (
-    <div className="divide-y" style={{ borderColor: 'var(--card-border)' }}>
+    <div>
       {groupedChains.map(([scannedCode, items]) => {
         const isOpen = openCode === scannedCode;
         return (
-          <div key={scannedCode}>
-            {/* Collapsed header row */}
-            <button
-              onClick={() => toggle(scannedCode)}
-              className="w-full px-4 py-2.5 flex items-center gap-3 text-left hover:bg-[var(--background-raised)] transition-colors"
-            >
-              {isOpen ? <ChevronDown size={12} className="text-[var(--muted)] shrink-0" /> : <ChevronRight size={12} className="text-[var(--muted)] shrink-0" />}
+          <div key={scannedCode} className="border-t" style={{ borderColor: 'var(--card-border)' }}>
+            {/* Header */}
+            <button onClick={() => toggle(scannedCode)}
+              className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-[var(--background-raised)] transition-colors">
+              <div className="shrink-0" style={{ color: isOpen ? 'var(--primary)' : 'var(--muted)' }}>
+                {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              </div>
               <div className="flex-1 min-w-0">
-                <span className="font-mono text-xs font-medium">{scannedCode}</span>
+                <span className="font-mono text-xs font-semibold">{scannedCode}</span>
                 <span className="text-[10px] text-[var(--muted)] ml-2">{descFor(scannedCode)}</span>
               </div>
-              <span className="text-[10px] text-[var(--muted)] shrink-0 truncate max-w-[300px]">
-                → {items.map(c => `${c.also_credit_code}${(c.credit_qty ?? 1) !== 1 ? ` ×${c.credit_qty}` : ''}`).join(', ')}
-              </span>
-              <span className="badge badge-slate text-[10px] shrink-0">{items.length}</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-[10px] text-[var(--muted)]">→</span>
+                {items.slice(0, 3).map(c => (
+                  <span key={c.id} className="font-mono text-[10px] px-1.5 py-0.5 rounded"
+                    style={{ background: 'var(--background)', color: 'var(--foreground)' }}>
+                    {c.also_credit_code}{(c.credit_qty ?? 1) !== 1 ? ` ×${c.credit_qty}` : ''}
+                  </span>
+                ))}
+                {items.length > 3 && <span className="text-[10px] text-[var(--muted)]">+{items.length - 3}</span>}
+              </div>
             </button>
 
-            {/* Expanded detail */}
+            {/* Expanded */}
             {isOpen && (
-              <div className="px-4 pb-3 pt-1 ml-7 border-l-2" style={{ borderColor: 'var(--primary)', background: 'rgba(37,99,235,0.02)' }}>
-                <div className="space-y-1.5">
+              <div className="pb-3 px-4">
+                <div className="ml-3 pl-4 border-l-2 space-y-2" style={{ borderColor: 'var(--primary)' }}>
                   {items.map(c => (
-                    <div key={c.id} className="flex items-start gap-2 py-1">
+                    <div key={c.id}>
                       {editingId === c.id ? (
-                        <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                          <div className="w-36 shrink-0"><SearchableCodeInput items={catalogItems} value={editCode} onChange={setEditCode} placeholder="Code..." /></div>
-                          <span className="text-[10px] text-[var(--muted)] truncate min-w-0 flex-1">{descFor(editCode)}</span>
-                          <input type="number" className="input font-mono text-[10px] text-center shrink-0" style={{ width: 40 }} value={editQty} onChange={e => setEditQty(parseFloat(e.target.value) || 1)} min={0.01} step="any" />
-                          <input className="input text-[10px] shrink-0" style={{ width: 72 }} value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Notes" />
-                          <button onClick={async () => { await onUpdate(c.id, { also_credit_code: editCode, credit_qty: editQty, notes: editNotes || null }); setEditingId(null); }}
-                            className="p-1 rounded hover:bg-green-50 text-[var(--success)] shrink-0"><Check size={13} /></button>
-                          <button onClick={() => setEditingId(null)} className="p-1 rounded hover:bg-gray-100 text-[var(--muted)] shrink-0"><X size={13} /></button>
+                        /* ── Edit mode ── */
+                        <div className="p-3 rounded-lg border space-y-2" style={{ borderColor: 'var(--primary)', background: 'rgba(37,99,235,0.03)' }}>
+                          <div className="flex items-start gap-3">
+                            <div className="flex-1 min-w-0">
+                              <label className="text-[9px] text-[var(--muted)] block mb-0.5">Product Code</label>
+                              <div className="max-w-xs">
+                                <SearchableCodeInput items={catalogItems} value={editState.code} onChange={v => setEditState(s => ({ ...s, code: v }))} placeholder="Code..." />
+                              </div>
+                              {editState.code && <div className="text-[10px] text-[var(--muted)] mt-0.5">{descFor(editState.code)}</div>}
+                            </div>
+                            <div className="shrink-0 text-center">
+                              <label className="text-[9px] text-[var(--muted)] block mb-0.5">Qty</label>
+                              <input type="number" className="input font-mono text-xs text-center" style={{ width: 48 }}
+                                value={editState.qty} onChange={e => setEditState(s => ({ ...s, qty: parseFloat(e.target.value) || 1 }))} min={0.01} step="any" />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-[9px] text-[var(--muted)] block mb-0.5">Notes</label>
+                            <input className="input text-xs max-w-xs" value={editState.notes} onChange={e => setEditState(s => ({ ...s, notes: e.target.value }))} placeholder="Optional" />
+                          </div>
+                          <div className="flex gap-2 pt-1">
+                            <button className="btn-primary text-[10px] py-1 px-3"
+                              onClick={async () => { await onUpdate(c.id, { also_credit_code: editState.code, credit_qty: editState.qty, notes: editState.notes || null }); setEditingId(null); }}>
+                              <Check size={11} /> Save
+                            </button>
+                            <button className="btn-secondary text-[10px] py-1 px-3" onClick={() => setEditingId(null)}>Cancel</button>
+                          </div>
                         </div>
                       ) : (
-                        <>
+                        /* ── Display mode ── */
+                        <div className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-[var(--background-raised)] transition-colors group">
                           <div className="flex-1 min-w-0">
                             <span className="font-mono text-xs font-medium" style={{ color: 'var(--primary)' }}>{c.also_credit_code}</span>
                             <span className="text-[10px] text-[var(--muted)] ml-2">{descFor(c.also_credit_code)}</span>
-                            {(c.credit_qty ?? 1) !== 1 && (
-                              <span className="text-[10px] font-mono font-semibold ml-1.5 px-1 py-0.5 rounded" style={{ background: 'var(--background)', color: 'var(--foreground)' }}>×{c.credit_qty}</span>
-                            )}
                           </div>
-                          {c.notes && <span className="text-[10px] text-[var(--muted)] shrink-0">{c.notes}</span>}
-                          <button onClick={() => { setEditingId(c.id); setEditCode(c.also_credit_code); setEditQty(c.credit_qty ?? 1); setEditNotes(c.notes || ''); }}
-                            className="p-1 rounded hover:bg-blue-50 text-[var(--muted-light)] hover:text-[var(--primary)] transition-colors shrink-0"><Pencil size={12} /></button>
-                          <button onClick={() => onDelete(c.id)}
-                            className="p-1 rounded hover:bg-red-50 text-[var(--muted-light)] hover:text-[var(--error)] transition-colors shrink-0"><Trash2 size={12} /></button>
-                        </>
+                          {(c.credit_qty ?? 1) !== 1 && (
+                            <span className="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0"
+                              style={{ background: 'var(--background)', color: 'var(--foreground)' }}>×{c.credit_qty}</span>
+                          )}
+                          {c.notes && <span className="text-[10px] text-[var(--muted)] shrink-0 hidden sm:inline">{c.notes}</span>}
+                          <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => startEdit(c)} className="p-1 rounded hover:bg-blue-50 text-[var(--muted-light)] hover:text-[var(--primary)]"><Pencil size={12} /></button>
+                            <button onClick={() => onDelete(c.id)} className="p-1 rounded hover:bg-red-50 text-[var(--muted-light)] hover:text-[var(--error)]"><Trash2 size={12} /></button>
+                          </div>
+                        </div>
                       )}
                     </div>
                   ))}
 
-                  {/* Add credit row */}
+                  {/* Add credit */}
                   {addingTo === scannedCode ? (
-                    <div className="flex items-center gap-1.5 pt-1">
-                      <div className="w-36 shrink-0"><SearchableCodeInput items={catalogItems} value={newCredit} onChange={setNewCredit} placeholder="Code..." /></div>
-                      <span className="text-[10px] text-[var(--muted)] truncate min-w-0 flex-1">{descFor(newCredit)}</span>
-                      <input type="number" className="input font-mono text-[10px] text-center shrink-0" style={{ width: 40 }} value={newCreditQty} onChange={e => setNewCreditQty(parseFloat(e.target.value) || 1)} min={0.01} step="any" />
-                      <button onClick={async () => { if (newCredit) { await onAddCredit(scannedCode, newCredit, undefined, newCreditQty); setAddingTo(null); setNewCredit(''); setNewCreditQty(1); } }}
-                        disabled={!newCredit} className="p-1 rounded hover:bg-green-50 text-[var(--success)] disabled:opacity-30 shrink-0"><Check size={13} /></button>
-                      <button onClick={() => { setAddingTo(null); setNewCreditQty(1); }} className="p-1 rounded hover:bg-gray-100 text-[var(--muted)] shrink-0"><X size={13} /></button>
+                    <div className="p-3 rounded-lg border space-y-2" style={{ borderColor: 'var(--card-border)', background: 'var(--background)' }}>
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1 min-w-0">
+                          <label className="text-[9px] text-[var(--muted)] block mb-0.5">Product Code</label>
+                          <div className="max-w-xs">
+                            <SearchableCodeInput items={catalogItems} value={addState.code} onChange={v => setAddState(s => ({ ...s, code: v }))} placeholder="Search product code..." />
+                          </div>
+                          {addState.code && <div className="text-[10px] text-[var(--muted)] mt-0.5">{descFor(addState.code)}</div>}
+                        </div>
+                        <div className="shrink-0 text-center">
+                          <label className="text-[9px] text-[var(--muted)] block mb-0.5">Qty</label>
+                          <input type="number" className="input font-mono text-xs text-center" style={{ width: 48 }}
+                            value={addState.qty} onChange={e => setAddState(s => ({ ...s, qty: parseFloat(e.target.value) || 1 }))} min={0.01} step="any" />
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button className="btn-primary text-[10px] py-1 px-3" disabled={!addState.code}
+                          onClick={async () => { await onAddCredit(scannedCode, addState.code, addState.qty); setAddingTo(null); setAddState({ code: '', qty: 1 }); }}>
+                          <Check size={11} /> Add
+                        </button>
+                        <button className="btn-secondary text-[10px] py-1 px-3" onClick={() => { setAddingTo(null); setAddState({ code: '', qty: 1 }); }}>Cancel</button>
+                      </div>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => { setAddingTo(scannedCode); setNewCredit(''); setNewCreditQty(1); }}
-                      className="text-[10px] text-[var(--primary)] font-medium flex items-center gap-1 hover:underline pt-1"
-                    >
-                      <Plus size={10} /> Add credit code
+                    <button onClick={() => { setAddingTo(scannedCode); setAddState({ code: '', qty: 1 }); }}
+                      className="text-[10px] text-[var(--primary)] font-medium flex items-center gap-1 hover:underline ml-2 py-1">
+                      <Plus size={10} /> Add credit
                     </button>
                   )}
                 </div>
