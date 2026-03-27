@@ -424,7 +424,7 @@ function ChainTable({ groupedChains, catalogItems, onDelete, onUpdate, onAddCred
                 <span className="text-[10px] text-[var(--muted)] ml-2">{descFor(scannedCode)}</span>
               </div>
               <span className="text-[10px] text-[var(--muted)] shrink-0 truncate max-w-[300px]">
-                → {items.map(c => `${c.also_credit_code}${c.credit_qty !== 1 ? ` ×${c.credit_qty}` : ''}`).join(', ')}
+                → {items.map(c => `${c.also_credit_code}${(c.credit_qty ?? 1) !== 1 ? ` ×${c.credit_qty}` : ''}`).join(', ')}
               </span>
               <span className="badge badge-slate text-[10px] shrink-0">{items.length}</span>
             </button>
@@ -437,9 +437,9 @@ function ChainTable({ groupedChains, catalogItems, onDelete, onUpdate, onAddCred
                     <div key={c.id} className="flex items-start gap-2 py-1">
                       {editingId === c.id ? (
                         <div className="flex-1 flex items-center gap-2">
-                          <div className="flex-1"><SearchableCodeInput items={catalogItems} value={editCode} onChange={setEditCode} placeholder="Search product code..." /></div>
-                          <input type="number" className="input font-mono text-xs text-center w-16" value={editQty} onChange={e => setEditQty(parseFloat(e.target.value) || 1)} min={0.01} step="any" title="Qty" />
-                          <input className="input text-xs w-28" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Notes" />
+                          <div className="w-48 shrink-0"><SearchableCodeInput items={catalogItems} value={editCode} onChange={setEditCode} placeholder="Product code..." /></div>
+                          <input type="number" className="input font-mono text-xs text-center w-14 shrink-0" value={editQty} onChange={e => setEditQty(parseFloat(e.target.value) || 1)} min={0.01} step="any" title="Qty" />
+                          <input className="input text-xs flex-1" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Notes" />
                           <button onClick={async () => { await onUpdate(c.id, { also_credit_code: editCode, credit_qty: editQty, notes: editNotes || null }); setEditingId(null); }}
                             className="p-1 rounded hover:bg-green-50 text-[var(--success)]"><Check size={13} /></button>
                           <button onClick={() => setEditingId(null)} className="p-1 rounded hover:bg-gray-100 text-[var(--muted)]"><X size={13} /></button>
@@ -447,13 +447,11 @@ function ChainTable({ groupedChains, catalogItems, onDelete, onUpdate, onAddCred
                       ) : (
                         <>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-mono text-xs font-medium" style={{ color: 'var(--primary)' }}>{c.also_credit_code}</span>
-                              {c.credit_qty !== 1 && (
-                                <span className="text-[10px] font-mono font-semibold px-1 py-0.5 rounded" style={{ background: 'var(--background)', color: 'var(--foreground)' }}>×{c.credit_qty}</span>
-                              )}
-                            </div>
-                            <div className="text-[10px] text-[var(--muted)] truncate">{descFor(c.also_credit_code)}</div>
+                            <span className="font-mono text-xs font-medium" style={{ color: 'var(--primary)' }}>{c.also_credit_code}</span>
+                            <span className="text-[10px] text-[var(--muted)] ml-2">{descFor(c.also_credit_code)}</span>
+                            {(c.credit_qty ?? 1) !== 1 && (
+                              <span className="text-[10px] font-mono font-semibold ml-1.5 px-1 py-0.5 rounded" style={{ background: 'var(--background)', color: 'var(--foreground)' }}>×{c.credit_qty}</span>
+                            )}
                           </div>
                           {c.notes && <span className="text-[10px] text-[var(--muted)] shrink-0">{c.notes}</span>}
                           <button onClick={() => { setEditingId(c.id); setEditCode(c.also_credit_code); setEditQty(c.credit_qty ?? 1); setEditNotes(c.notes || ''); }}
@@ -468,8 +466,8 @@ function ChainTable({ groupedChains, catalogItems, onDelete, onUpdate, onAddCred
                   {/* Add credit row */}
                   {addingTo === scannedCode ? (
                     <div className="flex items-center gap-2 pt-1">
-                      <div className="flex-1"><SearchableCodeInput items={catalogItems} value={newCredit} onChange={setNewCredit} placeholder="Search product code..." /></div>
-                      <input type="number" className="input font-mono text-xs text-center w-16" value={newCreditQty} onChange={e => setNewCreditQty(parseFloat(e.target.value) || 1)} min={0.01} step="any" title="Qty" />
+                      <div className="w-48 shrink-0"><SearchableCodeInput items={catalogItems} value={newCredit} onChange={setNewCredit} placeholder="Product code..." /></div>
+                      <input type="number" className="input font-mono text-xs text-center w-14 shrink-0" value={newCreditQty} onChange={e => setNewCreditQty(parseFloat(e.target.value) || 1)} min={0.01} step="any" title="Qty" />
                       <button onClick={async () => { if (newCredit) { await onAddCredit(scannedCode, newCredit, undefined, newCreditQty); setAddingTo(null); setNewCredit(''); setNewCreditQty(1); } }}
                         disabled={!newCredit} className="p-1 rounded hover:bg-green-50 text-[var(--success)] disabled:opacity-30"><Check size={13} /></button>
                       <button onClick={() => { setAddingTo(null); setNewCreditQty(1); }} className="p-1 rounded hover:bg-gray-100 text-[var(--muted)]"><X size={13} /></button>
