@@ -61,13 +61,14 @@ export async function GET(request: NextRequest) {
   if (allWipCodes.length > 0) {
     const { data: wipResults } = await supabase
       .from('count_results')
-      .select('part_number, count1_qty')
+      .select('part_number, count1_qty, count2_qty')
       .eq('stock_take_id', stockTakeId)
       .in('part_number', allWipCodes);
     if (wipResults) {
       for (const wr of wipResults) {
-        // Sum across stores
-        wipCounts[wr.part_number] = (wipCounts[wr.part_number] || 0) + (wr.count1_qty ?? 0);
+        // Sum across stores — use max of count1 or count2 to detect activity
+        const counted = Math.max(wr.count1_qty ?? 0, wr.count2_qty ?? 0);
+        wipCounts[wr.part_number] = (wipCounts[wr.part_number] || 0) + counted;
       }
     }
   }
