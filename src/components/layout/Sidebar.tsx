@@ -132,7 +132,7 @@ export function Sidebar() {
           className="text-white/20 text-[10px] overflow-hidden whitespace-nowrap"
           style={{ opacity: expanded ? 1 : 0, transition: 'opacity 150ms' }}
         >
-          v0.2.0
+          v0.2.1 · 2027c
         </div>
       </div>
     </aside>
