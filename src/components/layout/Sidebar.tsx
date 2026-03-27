@@ -93,30 +93,34 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-2 py-3 space-y-0.5">
+      <nav className="flex-1 py-3 space-y-0.5">
         {NAV.map(({ href, icon: Icon, label }) => {
           const active = pathname === href || (href !== '/' && pathname.startsWith(href));
           return (
             <Link
               key={href}
               href={href}
-              className="flex items-center gap-3 rounded-lg text-sm transition-colors group"
+              className="flex items-center text-sm transition-colors group relative"
               style={{
-                background: active ? 'var(--sidebar-active)' : 'transparent',
                 color: active ? 'white' : 'rgba(255,255,255,0.5)',
-                padding: expanded ? '10px 12px' : '10px 0',
-                justifyContent: expanded ? 'flex-start' : 'center',
+                padding: '10px 12px 10px 18px',
               }}
               title={expanded ? undefined : label}
             >
+              {/* Active indicator — left accent bar */}
+              {active && (
+                <div
+                  className="absolute left-0 top-2 bottom-2 rounded-r-full"
+                  style={{ width: 3, background: 'var(--primary)' }}
+                />
+              )}
               <Icon size={16} className="shrink-0" />
               <span
-                className="flex-1 overflow-hidden whitespace-nowrap"
+                className="overflow-hidden whitespace-nowrap ml-3"
                 style={{ opacity: expanded ? 1 : 0, width: expanded ? 'auto' : 0, transition: 'opacity 150ms' }}
               >
                 {label}
               </span>
-              {active && expanded && <ChevronRight size={12} className="opacity-50 shrink-0" />}
             </Link>
           );
         })}
