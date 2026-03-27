@@ -379,102 +379,90 @@ function ChainTable({ groupedChains, catalogItems, onDelete, onUpdate, onAddCred
   const [addingTo, setAddingTo] = useState<string | null>(null);
   const [newCredit, setNewCredit] = useState('');
 
+  const [openCode, setOpenCode] = useState<string | null>(null);
   const descFor = (code: string) => catalogItems.find(i => i.code === code)?.description || '';
 
+  const toggle = (code: string) => {
+    setOpenCode(openCode === code ? null : code);
+    setEditingId(null);
+    setAddingTo(null);
+  };
+
   return (
-    <table className="data-table">
-      <thead>
-        <tr>
-          <th>When Scanned</th>
-          <th>Also Credit</th>
-          <th className="w-40">Notes</th>
-          <th className="w-20"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {groupedChains.map(([scannedCode, items]) => (
-          items.map((c, idx) => (
-            <tr key={c.id}>
-              {idx === 0 && (
-                <td rowSpan={items.length + (addingTo === scannedCode ? 1 : 0)} className="align-top" style={{ verticalAlign: 'top', paddingTop: 12 }}>
-                  <div className="font-mono text-xs font-medium">{scannedCode}</div>
-                  <div className="text-[10px] text-[var(--muted)] truncate max-w-[180px]" title={descFor(scannedCode)}>{descFor(scannedCode)}</div>
-                  <button
-                    onClick={() => { setAddingTo(addingTo === scannedCode ? null : scannedCode); setNewCredit(''); }}
-                    className="block mt-1 text-[10px] text-[var(--primary)] font-medium flex items-center gap-0.5 hover:underline"
-                    style={{ fontFamily: 'var(--font-body)' }}
-                  >
-                    <Plus size={9} /> add credit
-                  </button>
-                </td>
-              )}
-              {editingId === c.id ? (
-                <>
-                  <td>
-                    <SearchableCodeInput items={catalogItems} value={editCode} onChange={setEditCode} placeholder="Search product code..." />
-                  </td>
-                  <td>
-                    <input className="input text-xs" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Notes" />
-                  </td>
-                  <td>
-                    <div className="flex gap-1">
-                      <button
-                        onClick={async () => { await onUpdate(c.id, { also_credit_code: editCode, notes: editNotes || null }); setEditingId(null); }}
-                        className="p-1.5 rounded hover:bg-green-50 text-[var(--success)] transition-colors"
-                      ><Check size={13} /></button>
-                      <button onClick={() => setEditingId(null)} className="p-1.5 rounded hover:bg-gray-100 text-[var(--muted)] transition-colors">
-                        <X size={13} />
-                      </button>
+    <div className="divide-y" style={{ borderColor: 'var(--card-border)' }}>
+      {groupedChains.map(([scannedCode, items]) => {
+        const isOpen = openCode === scannedCode;
+        return (
+          <div key={scannedCode}>
+            {/* Collapsed header row */}
+            <button
+              onClick={() => toggle(scannedCode)}
+              className="w-full px-4 py-2.5 flex items-center gap-3 text-left hover:bg-[var(--background-raised)] transition-colors"
+            >
+              {isOpen ? <ChevronDown size={12} className="text-[var(--muted)] shrink-0" /> : <ChevronRight size={12} className="text-[var(--muted)] shrink-0" />}
+              <div className="flex-1 min-w-0">
+                <span className="font-mono text-xs font-medium">{scannedCode}</span>
+                <span className="text-[10px] text-[var(--muted)] ml-2">{descFor(scannedCode)}</span>
+              </div>
+              <span className="text-[10px] text-[var(--muted)] shrink-0">
+                → {items.map(c => c.also_credit_code).join(', ')}
+              </span>
+              <span className="badge badge-slate text-[10px] shrink-0">{items.length}</span>
+            </button>
+
+            {/* Expanded detail */}
+            {isOpen && (
+              <div className="px-4 pb-3 pt-1 ml-7 border-l-2" style={{ borderColor: 'var(--primary)', background: 'rgba(37,99,235,0.02)' }}>
+                <div className="space-y-1.5">
+                  {items.map(c => (
+                    <div key={c.id} className="flex items-start gap-2 py-1">
+                      {editingId === c.id ? (
+                        <div className="flex-1 flex items-center gap-2">
+                          <div className="flex-1"><SearchableCodeInput items={catalogItems} value={editCode} onChange={setEditCode} placeholder="Search product code..." /></div>
+                          <input className="input text-xs w-32" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Notes" />
+                          <button onClick={async () => { await onUpdate(c.id, { also_credit_code: editCode, notes: editNotes || null }); setEditingId(null); }}
+                            className="p-1 rounded hover:bg-green-50 text-[var(--success)]"><Check size={13} /></button>
+                          <button onClick={() => setEditingId(null)} className="p-1 rounded hover:bg-gray-100 text-[var(--muted)]"><X size={13} /></button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-mono text-xs font-medium" style={{ color: 'var(--primary)' }}>{c.also_credit_code}</div>
+                            <div className="text-[10px] text-[var(--muted)] truncate">{descFor(c.also_credit_code)}</div>
+                          </div>
+                          {c.notes && <span className="text-[10px] text-[var(--muted)] shrink-0">{c.notes}</span>}
+                          <button onClick={() => { setEditingId(c.id); setEditCode(c.also_credit_code); setEditNotes(c.notes || ''); }}
+                            className="p-1 rounded hover:bg-blue-50 text-[var(--muted-light)] hover:text-[var(--primary)] transition-colors shrink-0"><Pencil size={12} /></button>
+                          <button onClick={() => onDelete(c.id)}
+                            className="p-1 rounded hover:bg-red-50 text-[var(--muted-light)] hover:text-[var(--error)] transition-colors shrink-0"><Trash2 size={12} /></button>
+                        </>
+                      )}
                     </div>
-                  </td>
-                </>
-              ) : (
-                <>
-                  <td>
-                    <div className="font-mono text-xs font-medium" style={{ color: 'var(--primary)' }}>{c.also_credit_code}</div>
-                    <div className="text-[10px] text-[var(--muted)] truncate max-w-[180px]" title={descFor(c.also_credit_code)}>{descFor(c.also_credit_code)}</div>
-                  </td>
-                  <td className="text-xs text-[var(--muted)]">{c.notes || '—'}</td>
-                  <td>
-                    <div className="flex gap-0.5">
-                      <button
-                        onClick={() => { setEditingId(c.id); setEditCode(c.also_credit_code); setEditNotes(c.notes || ''); }}
-                        className="p-1.5 rounded hover:bg-blue-50 text-[var(--muted-light)] hover:text-[var(--primary)] transition-colors"
-                      ><Pencil size={13} /></button>
-                      <button onClick={() => onDelete(c.id)}
-                        className="p-1.5 rounded hover:bg-red-50 text-[var(--muted-light)] hover:text-[var(--error)] transition-colors">
-                        <Trash2 size={13} />
-                      </button>
+                  ))}
+
+                  {/* Add credit row */}
+                  {addingTo === scannedCode ? (
+                    <div className="flex items-center gap-2 pt-1">
+                      <div className="flex-1"><SearchableCodeInput items={catalogItems} value={newCredit} onChange={setNewCredit} placeholder="Search product code..." /></div>
+                      <button onClick={async () => { if (newCredit) { await onAddCredit(scannedCode, newCredit); setAddingTo(null); setNewCredit(''); } }}
+                        disabled={!newCredit} className="p-1 rounded hover:bg-green-50 text-[var(--success)] disabled:opacity-30"><Check size={13} /></button>
+                      <button onClick={() => setAddingTo(null)} className="p-1 rounded hover:bg-gray-100 text-[var(--muted)]"><X size={13} /></button>
                     </div>
-                  </td>
-                </>
-              )}
-            </tr>
-          )).concat(
-            addingTo === scannedCode ? [(
-              <tr key={`add-${scannedCode}`}>
-                <td>
-                  <SearchableCodeInput items={catalogItems} value={newCredit} onChange={setNewCredit} placeholder="Search product code..." />
-                </td>
-                <td></td>
-                <td>
-                  <div className="flex gap-1">
+                  ) : (
                     <button
-                      onClick={async () => { if (newCredit) { await onAddCredit(scannedCode, newCredit); setAddingTo(null); setNewCredit(''); } }}
-                      disabled={!newCredit}
-                      className="p-1.5 rounded hover:bg-green-50 text-[var(--success)] transition-colors disabled:opacity-30"
-                    ><Check size={13} /></button>
-                    <button onClick={() => setAddingTo(null)} className="p-1.5 rounded hover:bg-gray-100 text-[var(--muted)] transition-colors">
-                      <X size={13} />
+                      onClick={() => { setAddingTo(scannedCode); setNewCredit(''); }}
+                      className="text-[10px] text-[var(--primary)] font-medium flex items-center gap-1 hover:underline pt-1"
+                    >
+                      <Plus size={10} /> Add credit code
                     </button>
-                  </div>
-                </td>
-              </tr>
-            )] : []
-          )
-        ))}
-      </tbody>
-    </table>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
