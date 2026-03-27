@@ -49,7 +49,7 @@ export function Sidebar() {
       className="flex-shrink-0 flex flex-col overflow-hidden"
       style={{
         background: 'var(--sidebar)',
-        minHeight: '100vh',
+        height: '100vh',
         width: expanded ? EXPANDED_W : COLLAPSED_W,
         transition: 'width 200ms cubic-bezier(0.4, 0, 0.2, 1)',
       }}
