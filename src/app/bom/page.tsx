@@ -415,7 +415,7 @@ function ChainAccordion({ groupedChains, catalogItems, descFor, onDelete, onUpda
                 {items.slice(0, 3).map(c => (
                   <span key={c.id} className="font-mono text-[10px] px-1.5 py-0.5 rounded"
                     style={{ background: 'var(--background)', color: 'var(--foreground)' }}>
-                    {c.also_credit_code}{(c.credit_qty ?? 1) !== 1 ? ` ×${c.credit_qty}` : ''}
+                    {c.also_credit_code} ×{c.credit_qty ?? 1}
                   </span>
                 ))}
                 {items.length > 3 && <span className="text-[10px] text-[var(--muted)]">+{items.length - 3}</span>}
@@ -462,10 +462,8 @@ function ChainAccordion({ groupedChains, catalogItems, descFor, onDelete, onUpda
                             <span className="font-mono text-xs font-medium" style={{ color: 'var(--primary)' }}>{c.also_credit_code}</span>
                             <span className="text-[10px] text-[var(--muted)] ml-2">{descFor(c.also_credit_code)}</span>
                           </div>
-                          {(c.credit_qty ?? 1) !== 1 && (
-                            <span className="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0"
-                              style={{ background: 'var(--background)', color: 'var(--foreground)' }}>×{c.credit_qty}</span>
-                          )}
+                          <span className="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0"
+                            style={{ background: 'var(--background)', color: 'var(--foreground)' }}>×{c.credit_qty ?? 1}</span>
                           {c.notes && <span className="text-[10px] text-[var(--muted)] shrink-0 hidden sm:inline">{c.notes}</span>}
                           <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button onClick={() => startEdit(c)} className="p-1 rounded hover:bg-blue-50 text-[var(--muted-light)] hover:text-[var(--primary)]"><Pencil size={12} /></button>
