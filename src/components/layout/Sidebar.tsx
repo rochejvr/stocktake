@@ -21,7 +21,6 @@ const NAV = [
 
 const EXPANDED_W = 224;
 const COLLAPSED_W = 56;
-const INFO_BLOCK_H = 60; // reserved height for stock take info block
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -34,9 +33,9 @@ export function Sidebar() {
     fetch('/api/stock-takes/active')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data) {
-          setStockTakeRef(data.reference || null);
-          setStatus(data.status || null);
+        if (data?.stockTake) {
+          setStockTakeRef(data.stockTake.reference || null);
+          setStatus(data.stockTake.status || null);
         } else {
           setStockTakeRef(null);
           setStatus(null);
@@ -75,19 +74,19 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* Active stock take info — always reserves space */}
-        <div className="px-3 pb-3 overflow-hidden" style={{ height: expanded ? INFO_BLOCK_H : 0, transition: 'height 200ms cubic-bezier(0.4, 0, 0.2, 1)' }}>
-          <div className="px-2 py-1.5 rounded-md bg-white/5 border border-white/10 h-full">
+        {/* Active stock take info — always same height, content fades */}
+        <div className="px-3 pb-3" style={{ opacity: expanded ? 1 : 0, transition: 'opacity 150ms', pointerEvents: expanded ? 'auto' : 'none' }}>
+          <div className="px-2 py-1.5 rounded-md bg-white/5 border border-white/10" style={{ minHeight: 44 }}>
             {stockTakeRef ? (
               <>
                 <div className="text-white/40 text-[10px] uppercase tracking-wider">Active</div>
-                <div className="text-white text-xs font-medium mt-0.5" style={{ fontFamily: 'var(--font-mono)' }}>
+                <div className="text-white text-xs font-medium mt-0.5 whitespace-nowrap" style={{ fontFamily: 'var(--font-mono)' }}>
                   {stockTakeRef}
                 </div>
                 {status && <StatusDot status={status} />}
               </>
             ) : (
-              <div className="text-white/20 text-[10px] uppercase tracking-wider pt-1">No active stock take</div>
+              <div className="text-white/20 text-[10px] uppercase tracking-wider pt-1 whitespace-nowrap">No active stock take</div>
             )}
           </div>
         </div>
