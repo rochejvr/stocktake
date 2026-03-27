@@ -330,7 +330,7 @@ function AddChainForm({ onSave, onCancel, catalogItems, descFor }: {
               </div>
               <div className="shrink-0 text-center">
                 <label className="text-[9px] text-[var(--muted)] block mb-0.5">Qty</label>
-                <input type="number" className="input font-mono text-xs text-center" style={{ width: 48 }}
+                <input type="number" className="input font-mono text-xs text-center" style={{ width: 52 }}
                   value={credit.qty} onChange={e => setCredits(prev => prev.map((c, i) => i === idx ? { ...c, qty: parseFloat(e.target.value) || 1 } : c))}
                   min={0.01} step="any" />
               </div>
@@ -441,7 +441,7 @@ function ChainAccordion({ groupedChains, catalogItems, descFor, onDelete, onUpda
                             </div>
                             <div className="shrink-0 text-center">
                               <label className="text-[9px] text-[var(--muted)] block mb-0.5">Qty</label>
-                              <input type="number" className="input font-mono text-xs text-center" style={{ width: 48 }}
+                              <input type="number" className="input font-mono text-xs text-center" style={{ width: 52 }}
                                 value={editState.qty} onChange={e => setEditState(s => ({ ...s, qty: parseFloat(e.target.value) || 1 }))} min={0.01} step="any" />
                             </div>
                           </div>
@@ -491,7 +491,7 @@ function ChainAccordion({ groupedChains, catalogItems, descFor, onDelete, onUpda
                         </div>
                         <div className="shrink-0 text-center">
                           <label className="text-[9px] text-[var(--muted)] block mb-0.5">Qty</label>
-                          <input type="number" className="input font-mono text-xs text-center" style={{ width: 48 }}
+                          <input type="number" className="input font-mono text-xs text-center" style={{ width: 52 }}
                             value={addState.qty} onChange={e => setAddState(s => ({ ...s, qty: parseFloat(e.target.value) || 1 }))} min={0.01} step="any" />
                         </div>
                       </div>
