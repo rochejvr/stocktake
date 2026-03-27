@@ -143,6 +143,7 @@ export interface ComponentChain {
   id: string;
   scanned_code: string;           // e.g. XM400-16B01-0401
   also_credit_code: string;       // e.g. XM400-16A01-0401
+  credit_qty: number;             // qty to credit per scan (default 1)
   notes: string | null;
   created_at: string;
 }

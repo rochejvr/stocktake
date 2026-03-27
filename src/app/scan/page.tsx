@@ -370,12 +370,12 @@ export default function ScanPage() {
         },
       ];
 
-      // Check for component chains
-      const chainMatch = chains.find(c => c.scanned_code === pending.barcode);
-      if (chainMatch) {
+      // Check for component chains (one scanned code can credit multiple items)
+      const chainMatches = chains.filter(c => c.scanned_code === pending.barcode);
+      for (const chain of chainMatches) {
         records.push({
-          barcode: chainMatch.also_credit_code,
-          quantity,
+          barcode: chain.also_credit_code,
+          quantity: chain.credit_qty ?? quantity,
           stock_take_id: stockTake.id,
           user_name: session.userName,
           store_code: storeCode,
@@ -395,21 +395,23 @@ export default function ScanPage() {
       // Add to local list with record IDs from the database
       const now = new Date().toISOString();
       const primaryRecord = savedRecords.find(r => r.barcode === pending.barcode);
-      const chainRecord = chainMatch ? savedRecords.find(r => r.barcode === chainMatch.also_credit_code) : null;
 
       const newItems: ScannedItem[] = [
         { id: primaryRecord?.id || '', barcode: pending.barcode, description: pending.description, qty: quantity, scannedAt: now, storeCode },
       ];
-      if (chainMatch && chainRecord) {
-        newItems.push({
-          id: chainRecord.id,
-          barcode: chainMatch.also_credit_code,
-          description: `Chain from ${pending.barcode}`,
-          qty: quantity,
-          scannedAt: now,
-          storeCode,
-          chained: true,
-        });
+      for (const chain of chainMatches) {
+        const chainRecord = savedRecords.find(r => r.barcode === chain.also_credit_code);
+        if (chainRecord) {
+          newItems.push({
+            id: chainRecord.id,
+            barcode: chain.also_credit_code,
+            description: `Chain from ${pending.barcode}`,
+            qty: chain.credit_qty ?? quantity,
+            scannedAt: now,
+            storeCode,
+            chained: true,
+          });
+        }
       }
 
       setItems(prev => [...newItems, ...prev]);

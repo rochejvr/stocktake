@@ -227,12 +227,11 @@ export default function BomPage() {
                   <AddChainForm
                     catalogItems={catalogItems}
                     onSave={async (data) => {
-                      // Save each credit code as a separate row
-                      for (const code of data.also_credit_codes) {
+                      for (const credit of data.credits) {
                         await fetch('/api/bom/chains', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ scanned_code: data.scanned_code, also_credit_code: code, notes: data.notes }),
+                          body: JSON.stringify({ scanned_code: data.scanned_code, also_credit_code: credit.code, credit_qty: credit.qty, notes: data.notes }),
                         });
                       }
                       await load();
@@ -271,11 +270,11 @@ export default function BomPage() {
                     });
                     if (res.ok) await load();
                   }}
-                  onAddCredit={async (scannedCode, creditCode, notes) => {
+                  onAddCredit={async (scannedCode, creditCode, notes, creditQty) => {
                     const res = await fetch('/api/bom/chains', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ scanned_code: scannedCode, also_credit_code: creditCode, notes }),
+                      body: JSON.stringify({ scanned_code: scannedCode, also_credit_code: creditCode, credit_qty: creditQty ?? 1, notes }),
                     });
                     if (res.ok) await load();
                   }}
@@ -292,33 +291,36 @@ export default function BomPage() {
 // ── Inline sub-components ───────────────────────────────────────────────────
 
 function AddChainForm({ onSave, onCancel, catalogItems }: {
-  onSave: (data: { scanned_code: string; also_credit_codes: string[]; notes?: string }) => Promise<void>;
+  onSave: (data: { scanned_code: string; credits: { code: string; qty: number }[]; notes?: string }) => Promise<void>;
   onCancel: () => void;
   catalogItems: { code: string; description: string }[];
 }) {
   const [scanned, setScanned] = useState('');
-  const [creditCodes, setCreditCodes] = useState<string[]>(['']);
+  const [credits, setCredits] = useState<{ code: string; qty: number }[]>([{ code: '', qty: 1 }]);
   const [notes, setNotes]     = useState('');
   const [saving, setSaving]   = useState(false);
 
-  const validCredits = creditCodes.filter(c => c.trim());
+  const validCredits = credits.filter(c => c.code.trim());
   const canSave = scanned && validCredits.length > 0;
 
   const handleSave = async () => {
     if (!canSave) return;
     setSaving(true);
     try {
-      await onSave({ scanned_code: scanned, also_credit_codes: validCredits, notes: notes || undefined });
+      await onSave({ scanned_code: scanned, credits: validCredits, notes: notes || undefined });
     } finally {
       setSaving(false);
     }
   };
 
-  const updateCredit = (idx: number, val: string) => {
-    setCreditCodes(prev => prev.map((c, i) => i === idx ? val : c));
+  const updateCreditCode = (idx: number, val: string) => {
+    setCredits(prev => prev.map((c, i) => i === idx ? { ...c, code: val } : c));
   };
-  const addCreditRow = () => setCreditCodes(prev => [...prev, '']);
-  const removeCreditRow = (idx: number) => setCreditCodes(prev => prev.filter((_, i) => i !== idx));
+  const updateCreditQty = (idx: number, val: number) => {
+    setCredits(prev => prev.map((c, i) => i === idx ? { ...c, qty: val } : c));
+  };
+  const addCreditRow = () => setCredits(prev => [...prev, { code: '', qty: 1 }]);
+  const removeCreditRow = (idx: number) => setCredits(prev => prev.filter((_, i) => i !== idx));
 
   return (
     <div className="space-y-3">
@@ -334,14 +336,29 @@ function AddChainForm({ onSave, onCancel, catalogItems }: {
       </div>
 
       <div>
-        <label className="text-[10px] font-semibold text-[var(--muted)] block mb-1" style={{ fontFamily: 'var(--font-display)' }}>Also Credit</label>
+        <div className="flex items-end gap-2 mb-1">
+          <label className="flex-1 text-[10px] font-semibold text-[var(--muted)]" style={{ fontFamily: 'var(--font-display)' }}>Also Credit</label>
+          <label className="w-20 text-[10px] font-semibold text-[var(--muted)] text-center" style={{ fontFamily: 'var(--font-display)' }}>Qty</label>
+          <div className="w-7" />
+        </div>
         <div className="space-y-1.5">
-          {creditCodes.map((code, idx) => (
+          {credits.map((credit, idx) => (
             <div key={idx} className="flex items-center gap-2">
               <div className="flex-1">
-                <SearchableCodeInput items={catalogItems} value={code} onChange={v => updateCredit(idx, v)} placeholder="Search product code..." />
+                <SearchableCodeInput items={catalogItems} value={credit.code} onChange={v => updateCreditCode(idx, v)} placeholder="Search product code..." />
               </div>
-              {creditCodes.length > 1 && (
+              <div className="w-20">
+                <input
+                  type="number"
+                  className="input font-mono text-xs text-center w-full"
+                  value={credit.qty}
+                  onChange={e => updateCreditQty(idx, parseFloat(e.target.value) || 1)}
+                  min={0.01}
+                  step="any"
+                  title="Qty per scan"
+                />
+              </div>
+              {credits.length > 1 && (
                 <button onClick={() => removeCreditRow(idx)} className="p-1.5 rounded hover:bg-red-50 text-[var(--muted-light)] hover:text-[var(--error)] transition-colors">
                   <X size={13} />
                 </button>
@@ -371,13 +388,15 @@ function ChainTable({ groupedChains, catalogItems, onDelete, onUpdate, onAddCred
   catalogItems: { code: string; description: string }[];
   onDelete: (id: string) => void;
   onUpdate: (id: string, data: Partial<ComponentChain>) => Promise<void>;
-  onAddCredit: (scannedCode: string, creditCode: string, notes?: string) => Promise<void>;
+  onAddCredit: (scannedCode: string, creditCode: string, notes?: string, creditQty?: number) => Promise<void>;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editCode, setEditCode] = useState('');
+  const [editQty, setEditQty] = useState(1);
   const [editNotes, setEditNotes] = useState('');
   const [addingTo, setAddingTo] = useState<string | null>(null);
   const [newCredit, setNewCredit] = useState('');
+  const [newCreditQty, setNewCreditQty] = useState(1);
 
   const [openCode, setOpenCode] = useState<string | null>(null);
   const descFor = (code: string) => catalogItems.find(i => i.code === code)?.description || '';
@@ -404,8 +423,8 @@ function ChainTable({ groupedChains, catalogItems, onDelete, onUpdate, onAddCred
                 <span className="font-mono text-xs font-medium">{scannedCode}</span>
                 <span className="text-[10px] text-[var(--muted)] ml-2">{descFor(scannedCode)}</span>
               </div>
-              <span className="text-[10px] text-[var(--muted)] shrink-0">
-                → {items.map(c => c.also_credit_code).join(', ')}
+              <span className="text-[10px] text-[var(--muted)] shrink-0 truncate max-w-[300px]">
+                → {items.map(c => `${c.also_credit_code}${c.credit_qty !== 1 ? ` ×${c.credit_qty}` : ''}`).join(', ')}
               </span>
               <span className="badge badge-slate text-[10px] shrink-0">{items.length}</span>
             </button>
@@ -419,19 +438,25 @@ function ChainTable({ groupedChains, catalogItems, onDelete, onUpdate, onAddCred
                       {editingId === c.id ? (
                         <div className="flex-1 flex items-center gap-2">
                           <div className="flex-1"><SearchableCodeInput items={catalogItems} value={editCode} onChange={setEditCode} placeholder="Search product code..." /></div>
-                          <input className="input text-xs w-32" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Notes" />
-                          <button onClick={async () => { await onUpdate(c.id, { also_credit_code: editCode, notes: editNotes || null }); setEditingId(null); }}
+                          <input type="number" className="input font-mono text-xs text-center w-16" value={editQty} onChange={e => setEditQty(parseFloat(e.target.value) || 1)} min={0.01} step="any" title="Qty" />
+                          <input className="input text-xs w-28" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Notes" />
+                          <button onClick={async () => { await onUpdate(c.id, { also_credit_code: editCode, credit_qty: editQty, notes: editNotes || null }); setEditingId(null); }}
                             className="p-1 rounded hover:bg-green-50 text-[var(--success)]"><Check size={13} /></button>
                           <button onClick={() => setEditingId(null)} className="p-1 rounded hover:bg-gray-100 text-[var(--muted)]"><X size={13} /></button>
                         </div>
                       ) : (
                         <>
                           <div className="flex-1 min-w-0">
-                            <div className="font-mono text-xs font-medium" style={{ color: 'var(--primary)' }}>{c.also_credit_code}</div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono text-xs font-medium" style={{ color: 'var(--primary)' }}>{c.also_credit_code}</span>
+                              {c.credit_qty !== 1 && (
+                                <span className="text-[10px] font-mono font-semibold px-1 py-0.5 rounded" style={{ background: 'var(--background)', color: 'var(--foreground)' }}>×{c.credit_qty}</span>
+                              )}
+                            </div>
                             <div className="text-[10px] text-[var(--muted)] truncate">{descFor(c.also_credit_code)}</div>
                           </div>
                           {c.notes && <span className="text-[10px] text-[var(--muted)] shrink-0">{c.notes}</span>}
-                          <button onClick={() => { setEditingId(c.id); setEditCode(c.also_credit_code); setEditNotes(c.notes || ''); }}
+                          <button onClick={() => { setEditingId(c.id); setEditCode(c.also_credit_code); setEditQty(c.credit_qty ?? 1); setEditNotes(c.notes || ''); }}
                             className="p-1 rounded hover:bg-blue-50 text-[var(--muted-light)] hover:text-[var(--primary)] transition-colors shrink-0"><Pencil size={12} /></button>
                           <button onClick={() => onDelete(c.id)}
                             className="p-1 rounded hover:bg-red-50 text-[var(--muted-light)] hover:text-[var(--error)] transition-colors shrink-0"><Trash2 size={12} /></button>
@@ -444,13 +469,14 @@ function ChainTable({ groupedChains, catalogItems, onDelete, onUpdate, onAddCred
                   {addingTo === scannedCode ? (
                     <div className="flex items-center gap-2 pt-1">
                       <div className="flex-1"><SearchableCodeInput items={catalogItems} value={newCredit} onChange={setNewCredit} placeholder="Search product code..." /></div>
-                      <button onClick={async () => { if (newCredit) { await onAddCredit(scannedCode, newCredit); setAddingTo(null); setNewCredit(''); } }}
+                      <input type="number" className="input font-mono text-xs text-center w-16" value={newCreditQty} onChange={e => setNewCreditQty(parseFloat(e.target.value) || 1)} min={0.01} step="any" title="Qty" />
+                      <button onClick={async () => { if (newCredit) { await onAddCredit(scannedCode, newCredit, undefined, newCreditQty); setAddingTo(null); setNewCredit(''); setNewCreditQty(1); } }}
                         disabled={!newCredit} className="p-1 rounded hover:bg-green-50 text-[var(--success)] disabled:opacity-30"><Check size={13} /></button>
-                      <button onClick={() => setAddingTo(null)} className="p-1 rounded hover:bg-gray-100 text-[var(--muted)]"><X size={13} /></button>
+                      <button onClick={() => { setAddingTo(null); setNewCreditQty(1); }} className="p-1 rounded hover:bg-gray-100 text-[var(--muted)]"><X size={13} /></button>
                     </div>
                   ) : (
                     <button
-                      onClick={() => { setAddingTo(scannedCode); setNewCredit(''); }}
+                      onClick={() => { setAddingTo(scannedCode); setNewCredit(''); setNewCreditQty(1); }}
                       className="text-[10px] text-[var(--primary)] font-medium flex items-center gap-1 hover:underline pt-1"
                     >
                       <Plus size={10} /> Add credit code
