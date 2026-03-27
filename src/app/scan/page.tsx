@@ -371,11 +371,12 @@ export default function ScanPage() {
       ];
 
       // Check for component chains (one scanned code can credit multiple items)
+      // credit_qty is a multiplier: scanned 148 × credit_qty 1 = credit 148
       const chainMatches = chains.filter(c => c.scanned_code === pending.barcode);
       for (const chain of chainMatches) {
         records.push({
           barcode: chain.also_credit_code,
-          quantity: chain.credit_qty ?? quantity,
+          quantity: quantity * (chain.credit_qty ?? 1),
           stock_take_id: stockTake.id,
           user_name: session.userName,
           store_code: storeCode,
@@ -406,7 +407,7 @@ export default function ScanPage() {
             id: chainRecord.id,
             barcode: chain.also_credit_code,
             description: `Chain from ${pending.barcode}`,
-            qty: chain.credit_qty ?? quantity,
+            qty: quantity * (chain.credit_qty ?? 1),
             scannedAt: now,
             storeCode,
             chained: true,
