@@ -492,7 +492,7 @@ export default function ReconcilePage() {
                               />
                             </td>
                             <td className="px-2 py-2 font-mono font-medium">{item.part_number}</td>
-                            <td className="px-2 py-2 text-[var(--muted)] max-w-[150px] truncate">{item.description}</td>
+                            <td className="px-2 py-2 text-[var(--muted)]">{item.description}</td>
                             <td className="px-2 py-2 text-[var(--muted)]">{STORE_LABELS[item.store_code] || item.store_code}</td>
                             <td className="px-2 py-2 text-right font-mono">{item.pastel_qty}</td>
                             <td className="px-2 py-2 text-right font-mono">{item.count1_qty ?? '—'}</td>
@@ -512,17 +512,17 @@ export default function ReconcilePage() {
                             </td>
                             <td className="px-2 py-2 font-mono text-[11px]">
                               {uniqueRelated.length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
+                                <div className="flex flex-col gap-0.5">
                                   {item.related_wip_codes.map(w => {
                                     const active = w.count1_qty > 0;
                                     return (
-                                      <span key={w.wip_code} className={active ? 'font-bold text-[var(--foreground)]' : 'text-[var(--muted)]'}>
+                                      <div key={w.wip_code} className={active ? 'font-bold text-[var(--foreground)]' : 'text-[var(--muted)]'}>
                                         {w.wip_code}
-                                      </span>
+                                      </div>
                                     );
                                   })}
                                   {item.related_chain_codes.map(c => (
-                                    <span key={c} className="text-[var(--muted)]">{c}</span>
+                                    <div key={c} className="text-[var(--muted)]">{c}</div>
                                   ))}
                                 </div>
                               ) : '—'}
