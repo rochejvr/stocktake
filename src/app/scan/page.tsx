@@ -124,24 +124,54 @@ export default function ScanPage() {
 
         setStockTake(st);
 
-        // Auto-set Count 2 when in recount mode + load flagged parts
+        // Auto-set Count 2 when in recount mode + load flagged parts + their WIPs
         if (st.status === 'recount') {
           setCountNumber(2);
-          fetchWithTimeout(`/api/count-results?stockTakeId=${st.id}&filter=flagged`)
-            .then(r => r.json())
-            .then((data: Array<{ part_number: string; store_code: string }>) => {
-              if (Array.isArray(data)) {
-                setRecountParts(new Set(data.map(r => `${r.part_number}|${r.store_code}`)));
+          Promise.all([
+            fetchWithTimeout(`/api/count-results?stockTakeId=${st.id}&filter=flagged`).then(r => r.json()),
+            fetchWithTimeout('/api/bom/mappings').then(r => r.json()),
+            fetchWithTimeout('/api/bom/chains').then(r => r.json()),
+          ]).then(([flagged, mappings, chainsData]: [
+            Array<{ part_number: string; store_code: string }>,
+            Array<{ wip_code: string; component_code: string }>,
+            Array<{ scanned_code: string; also_credit_code: string }>,
+          ]) => {
+            if (!Array.isArray(flagged)) return;
+            const parts = new Set<string>();
+            const flaggedCodes = new Set(flagged.map(r => r.part_number));
+            // Add flagged XM parts
+            for (const r of flagged) {
+              parts.add(`${r.part_number}|${r.store_code}`);
+            }
+            // Add WIPs that contain any flagged component
+            if (Array.isArray(mappings)) {
+              for (const m of mappings) {
+                if (flaggedCodes.has(m.component_code)) {
+                  parts.add(`${m.wip_code}|001`);
+                  parts.add(`${m.wip_code}|002`);
+                }
               }
-            })
+            }
+            // Add chain scanned codes that credit flagged components
+            if (Array.isArray(chainsData)) {
+              for (const c of chainsData) {
+                if (flaggedCodes.has(c.also_credit_code)) {
+                  parts.add(`${c.scanned_code}|001`);
+                  parts.add(`${c.scanned_code}|002`);
+                }
+              }
+            }
+            setRecountParts(parts);
+            // Also set chains from the same fetch
+            if (Array.isArray(chainsData)) setChains(chainsData as ComponentChain[]);
+          }).catch(() => {});
+        } else {
+          // Non-recount: load chains separately
+          fetchWithTimeout('/api/bom/chains')
+            .then(r => r.json())
+            .then(d => setChains(Array.isArray(d) ? d : []))
             .catch(() => {});
         }
-
-        // Load component chains (non-blocking — don't let it hold up the page)
-        fetchWithTimeout('/api/bom/chains')
-          .then(r => r.json())
-          .then(d => setChains(Array.isArray(d) ? d : []))
-          .catch(() => {});
 
         // Check for existing session in localStorage
         const saved = loadSession();
