@@ -52,6 +52,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'stock_take_id, user_name, count_number required' }, { status: 400 });
   }
 
+  // Get current round from stock take
+  const { data: st } = await supabase.from('stock_takes').select('current_round').eq('id', stock_take_id).single();
+  const roundNumber = st?.current_round || 1;
+
   const { data, error } = await supabase
     .from('scan_sessions')
     .insert({
@@ -59,6 +63,7 @@ export async function POST(request: NextRequest) {
       user_id: crypto.randomUUID(),
       user_name,
       count_number,
+      round_number: roundNumber,
       zone: zone || null,
       started_at: new Date().toISOString(),
       device_info: device_info || null,

@@ -29,16 +29,16 @@ export async function POST(
   const countCol = isRecount ? 'count2_qty' : 'count1_qty';
 
   // 2. Get scan sessions for this count number
-  // For recounts: only use sessions created AFTER the last end-counting
-  // so we don't re-aggregate old sessions (recount replaces, not adds)
+  // For recounts: only use sessions from the current round
+  const currentRound = st.current_round || 1;
   let sessionQuery = supabase
     .from('scan_sessions')
     .select('id')
     .eq('stock_take_id', id)
     .eq('count_number', countNumber);
 
-  if (isRecount && st.last_count_ended_at) {
-    sessionQuery = sessionQuery.gt('submitted_at', st.last_count_ended_at);
+  if (isRecount) {
+    sessionQuery = sessionQuery.eq('round_number', currentRound);
   }
 
   const { data: sessions } = await sessionQuery;
@@ -201,12 +201,9 @@ export async function POST(
     }
   }
 
-  // 5. Advance status and record when this end-counting ran
+  // 5. Advance status
   const newStatus = (!isRecount && flaggedCount > 0) ? 'recount' : 'reviewing';
-  const update: Record<string, unknown> = {
-    status: newStatus,
-    last_count_ended_at: new Date().toISOString(),
-  };
+  const update: Record<string, unknown> = { status: newStatus };
 
   const { error: statusErr } = await supabase
     .from('stock_takes')

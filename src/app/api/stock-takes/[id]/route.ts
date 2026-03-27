@@ -49,6 +49,10 @@ export async function PATCH(
     update.frozen_at = now;
     update.frozen_by = 'admin';
   }
+  if (newStatus === 'recount') {
+    // Increment round number — each recount is a new round
+    update.current_round = (st.current_round || 1) + 1;
+  }
   if (newStatus === 'complete') {
     update.completed_at = now;
   }

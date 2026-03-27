@@ -52,8 +52,11 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Create new session
+  // Create new session — get current round from stock take
   const cn = count_number || 1;
+  const { data: stRound } = await supabase.from('stock_takes').select('current_round').eq('id', stock_take_id).single();
+  const roundNumber = stRound?.current_round || 1;
+
   const { data: newSession, error: sessErr } = await supabase
     .from('scan_sessions')
     .insert({
@@ -61,6 +64,7 @@ export async function POST(request: NextRequest) {
       user_id: counter.id,
       user_name: counter.name,
       count_number: cn,
+      round_number: roundNumber,
       zone: counter.zone,
       started_at: new Date().toISOString(),
       device_info: device_info || null,
