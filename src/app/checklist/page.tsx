@@ -226,7 +226,7 @@ export default function ChecklistPage() {
   }
 
   return (
-    <AppShell stockTakeRef={stockTake.reference} status={stockTake.status}>
+    <AppShell>
       <div className="p-8 space-y-6 fade-in">
         {/* Header */}
         <div className="flex items-start justify-between">

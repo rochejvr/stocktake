@@ -350,7 +350,7 @@ export default function ReconcilePage() {
   };
 
   return (
-    <AppShell stockTakeRef={stockTake?.reference} status={stockTake?.status}>
+    <AppShell>
       <div className="p-8">
         {loading && (
           <div className="flex items-center justify-center h-64 text-[var(--muted)]">

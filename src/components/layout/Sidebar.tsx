@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -19,17 +19,31 @@ const NAV = [
   { href: '/export',      icon: FileDown,      label: 'Export' },
 ];
 
-const EXPANDED_W = 224; // w-56
+const EXPANDED_W = 224;
 const COLLAPSED_W = 56;
+const INFO_BLOCK_H = 60; // reserved height for stock take info block
 
-interface SidebarProps {
-  stockTakeRef?: string;
-  status?: string;
-}
-
-export function Sidebar({ stockTakeRef, status }: SidebarProps) {
+export function Sidebar() {
   const pathname = usePathname();
   const [expanded, setExpanded] = useState(false);
+  const [stockTakeRef, setStockTakeRef] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+
+  // Fetch active stock take directly — consistent across all pages
+  useEffect(() => {
+    fetch('/api/stock-takes/active')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data) {
+          setStockTakeRef(data.reference || null);
+          setStatus(data.status || null);
+        } else {
+          setStockTakeRef(null);
+          setStatus(null);
+        }
+      })
+      .catch(() => { /* ignore */ });
+  }, [pathname]); // re-fetch on navigation to stay current
 
   return (
     <aside
@@ -43,9 +57,10 @@ export function Sidebar({ stockTakeRef, status }: SidebarProps) {
       onMouseEnter={() => setExpanded(true)}
       onMouseLeave={() => setExpanded(false)}
     >
-      {/* Logo */}
-      <div className="px-3 py-4 border-b border-white/10" style={{ minHeight: expanded ? 'auto' : 56 }}>
-        <div className="flex items-center gap-2.5">
+      {/* Logo + Info block — fixed height to prevent nav jumping */}
+      <div className="border-b border-white/10">
+        {/* Logo row */}
+        <div className="px-3 py-3 flex items-center gap-2.5">
           <div
             className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm shrink-0"
             style={{ background: 'var(--primary)', fontFamily: 'var(--font-display)' }}
@@ -60,9 +75,9 @@ export function Sidebar({ stockTakeRef, status }: SidebarProps) {
           </div>
         </div>
 
-        {/* Active stock take ref — only shown when expanded */}
-        {expanded && (
-          <div className="mt-3 px-2 py-1.5 rounded-md bg-white/5 border border-white/10 min-h-[3.25rem]">
+        {/* Active stock take info — always reserves space */}
+        <div className="px-3 pb-3 overflow-hidden" style={{ height: expanded ? INFO_BLOCK_H : 0, transition: 'height 200ms cubic-bezier(0.4, 0, 0.2, 1)' }}>
+          <div className="px-2 py-1.5 rounded-md bg-white/5 border border-white/10 h-full">
             {stockTakeRef ? (
               <>
                 <div className="text-white/40 text-[10px] uppercase tracking-wider">Active</div>
@@ -75,7 +90,7 @@ export function Sidebar({ stockTakeRef, status }: SidebarProps) {
               <div className="text-white/20 text-[10px] uppercase tracking-wider pt-1">No active stock take</div>
             )}
           </div>
-        )}
+        </div>
       </div>
 
       {/* Nav */}
