@@ -7,7 +7,7 @@ import { WipDetailPanel } from '@/components/bom/WipDetailPanel';
 import { ComponentCompare } from '@/components/bom/ComponentCompare';
 import {
   GitBranch, Upload, Loader, Plus, ArrowLeftRight, Link2,
-  ChevronDown, ChevronRight, Trash2, Check, X,
+  ChevronDown, ChevronRight, Trash2, Check, X, Pencil,
 } from 'lucide-react';
 import type { BomMapping, ComponentChain } from '@/types';
 
@@ -48,6 +48,16 @@ export default function BomPage() {
   }, [mappings]);
 
   const selectedComponents = selectedWip ? (grouped[selectedWip] || []) : [];
+
+  // Group chains by scanned_code for display
+  const groupedChains = useMemo(() => {
+    const map: Record<string, ComponentChain[]> = {};
+    for (const c of chains) {
+      if (!map[c.scanned_code]) map[c.scanned_code] = [];
+      map[c.scanned_code].push(c);
+    }
+    return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [chains]);
 
   // All unique codes for searchable dropdowns (WIP codes + component codes)
   const allCodes = useMemo(() => {
@@ -205,7 +215,7 @@ export default function BomPage() {
             {showChains ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             <Link2 size={14} style={{ color: 'var(--primary)' }} />
             <span className="text-sm font-semibold">Component Chains</span>
-            <span className="badge badge-slate">{chains.length}</span>
+            <span className="badge badge-slate">{groupedChains.length}</span>
           </button>
 
           {showChains && (
@@ -215,52 +225,59 @@ export default function BomPage() {
                   <AddChainForm
                     allCodes={allCodes}
                     onSave={async (data) => {
-                      const res = await fetch('/api/bom/chains', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-                      });
-                      if (res.ok) { await load(); setShowAddChain(false); }
+                      // Save each credit code as a separate row
+                      for (const code of data.also_credit_codes) {
+                        await fetch('/api/bom/chains', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ scanned_code: data.scanned_code, also_credit_code: code, notes: data.notes }),
+                        });
+                      }
+                      await load();
+                      setShowAddChain(false);
                     }}
                     onCancel={() => setShowAddChain(false)}
                   />
                 </div>
               )}
 
+              {/* Contextual action bar */}
               <div className="px-4 py-2 flex justify-end border-b" style={{ borderColor: 'var(--card-border-light)' }}>
-                <button onClick={() => setShowAddChain(!showAddChain)} className="btn-primary text-xs py-1 px-3">
-                  <Plus size={12} /> Add Chain
-                </button>
+                {!showAddChain ? (
+                  <button onClick={() => setShowAddChain(true)} className="btn-primary text-xs py-1 px-3">
+                    <Plus size={12} /> Add Chain
+                  </button>
+                ) : (
+                  <span className="text-[10px] text-[var(--muted)] italic">Fill in the form above and click Save</span>
+                )}
               </div>
 
-              {chains.length === 0 ? (
+              {groupedChains.length === 0 ? (
                 <div className="py-8 text-center text-xs text-[var(--muted)]">
                   No component chains configured
                 </div>
               ) : (
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>When Scanned</th>
-                      <th>Also Credit</th>
-                      <th className="w-48">Notes</th>
-                      <th className="w-16"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {chains.map(c => (
-                      <tr key={c.id}>
-                        <td><span className="font-mono text-xs font-medium">{c.scanned_code}</span></td>
-                        <td><span className="font-mono text-xs font-medium" style={{ color: 'var(--primary)' }}>{c.also_credit_code}</span></td>
-                        <td className="text-xs text-[var(--muted)]">{c.notes || '—'}</td>
-                        <td>
-                          <button onClick={() => handleDeleteChain(c.id)}
-                            className="p-1.5 rounded hover:bg-red-50 text-[var(--muted-light)] hover:text-[var(--error)] transition-colors">
-                            <Trash2 size={13} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <ChainTable
+                  groupedChains={groupedChains}
+                  allCodes={allCodes}
+                  onDelete={handleDeleteChain}
+                  onUpdate={async (id, data) => {
+                    const res = await fetch(`/api/bom/chains/${id}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(data),
+                    });
+                    if (res.ok) await load();
+                  }}
+                  onAddCredit={async (scannedCode, creditCode, notes) => {
+                    const res = await fetch('/api/bom/chains', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ scanned_code: scannedCode, also_credit_code: creditCode, notes }),
+                    });
+                    if (res.ok) await load();
+                  }}
+                />
               )}
             </div>
           )}
@@ -273,50 +290,183 @@ export default function BomPage() {
 // ── Inline sub-components ───────────────────────────────────────────────────
 
 function AddChainForm({ onSave, onCancel, allCodes }: {
-  onSave: (data: { scanned_code: string; also_credit_code: string; notes?: string }) => Promise<void>;
+  onSave: (data: { scanned_code: string; also_credit_codes: string[]; notes?: string }) => Promise<void>;
   onCancel: () => void;
   allCodes: string[];
 }) {
   const [scanned, setScanned] = useState('');
-  const [credit, setCredit]   = useState('');
+  const [creditCodes, setCreditCodes] = useState<string[]>(['']);
   const [notes, setNotes]     = useState('');
   const [saving, setSaving]   = useState(false);
 
+  const validCredits = creditCodes.filter(c => c.trim());
+  const canSave = scanned && validCredits.length > 0;
+
   const handleSave = async () => {
-    if (!scanned || !credit) return;
+    if (!canSave) return;
     setSaving(true);
     try {
-      await onSave({ scanned_code: scanned, also_credit_code: credit, notes: notes || undefined });
+      await onSave({ scanned_code: scanned, also_credit_codes: validCredits, notes: notes || undefined });
     } finally {
       setSaving(false);
     }
   };
 
+  const updateCredit = (idx: number, val: string) => {
+    setCreditCodes(prev => prev.map((c, i) => i === idx ? val : c));
+  };
+  const addCreditRow = () => setCreditCodes(prev => [...prev, '']);
+  const removeCreditRow = (idx: number) => setCreditCodes(prev => prev.filter((_, i) => i !== idx));
+
   return (
-    <div className="grid grid-cols-3 gap-3 items-end">
-      <div>
-        <label className="text-[10px] font-semibold text-[var(--muted)] block mb-1" style={{ fontFamily: 'var(--font-display)' }}>When Scanned</label>
-        <SearchableCodeInput codes={allCodes} value={scanned} onChange={setScanned} placeholder="Search item code..." />
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-[10px] font-semibold text-[var(--muted)] block mb-1" style={{ fontFamily: 'var(--font-display)' }}>When Scanned</label>
+          <SearchableCodeInput codes={allCodes} value={scanned} onChange={setScanned} placeholder="Search item code..." />
+        </div>
+        <div>
+          <label className="text-[10px] font-semibold text-[var(--muted)] block mb-1" style={{ fontFamily: 'var(--font-display)' }}>Notes</label>
+          <input className="input text-xs" placeholder="Optional" value={notes} onChange={e => setNotes(e.target.value)} />
+        </div>
       </div>
+
       <div>
         <label className="text-[10px] font-semibold text-[var(--muted)] block mb-1" style={{ fontFamily: 'var(--font-display)' }}>Also Credit</label>
-        <SearchableCodeInput codes={allCodes} value={credit} onChange={setCredit} placeholder="Search item code..." />
+        <div className="space-y-1.5">
+          {creditCodes.map((code, idx) => (
+            <div key={idx} className="flex items-center gap-2">
+              <div className="flex-1">
+                <SearchableCodeInput codes={allCodes} value={code} onChange={v => updateCredit(idx, v)} placeholder="Search item code..." />
+              </div>
+              {creditCodes.length > 1 && (
+                <button onClick={() => removeCreditRow(idx)} className="p-1.5 rounded hover:bg-red-50 text-[var(--muted-light)] hover:text-[var(--error)] transition-colors">
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          ))}
+          <button onClick={addCreditRow} className="text-[10px] text-[var(--primary)] font-medium flex items-center gap-1 hover:underline">
+            <Plus size={10} /> Add another credit code
+          </button>
+        </div>
       </div>
-      <div>
-        <label className="text-[10px] font-semibold text-[var(--muted)] block mb-1" style={{ fontFamily: 'var(--font-display)' }}>Notes</label>
-        <input className="input text-xs" placeholder="Optional" value={notes} onChange={e => setNotes(e.target.value)} />
-      </div>
-      <div className="col-span-3 flex gap-2">
-        <button className="btn-primary text-xs py-1.5"
-          onClick={handleSave}
-          disabled={!scanned || !credit || saving}>
-          {saving ? <Loader size={12} className="animate-spin" /> : <Check size={12} />} {saving ? 'Saving...' : 'Save'}
+
+      <div className="flex gap-2 pt-1">
+        <button className="btn-primary text-xs py-1.5" onClick={handleSave} disabled={!canSave || saving}>
+          {saving ? <Loader size={12} className="animate-spin" /> : <Check size={12} />} {saving ? 'Saving...' : 'Save Chain'}
         </button>
         <button className="btn-secondary text-xs py-1.5" onClick={onCancel} disabled={saving}>
           <X size={12} /> Cancel
         </button>
       </div>
     </div>
+  );
+}
+
+function ChainTable({ groupedChains, allCodes, onDelete, onUpdate, onAddCredit }: {
+  groupedChains: [string, ComponentChain[]][];
+  allCodes: string[];
+  onDelete: (id: string) => void;
+  onUpdate: (id: string, data: Partial<ComponentChain>) => Promise<void>;
+  onAddCredit: (scannedCode: string, creditCode: string, notes?: string) => Promise<void>;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editCode, setEditCode] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [addingTo, setAddingTo] = useState<string | null>(null);
+  const [newCredit, setNewCredit] = useState('');
+
+  return (
+    <table className="data-table">
+      <thead>
+        <tr>
+          <th>When Scanned</th>
+          <th>Also Credit</th>
+          <th className="w-40">Notes</th>
+          <th className="w-20"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {groupedChains.map(([scannedCode, items]) => (
+          items.map((c, idx) => (
+            <tr key={c.id}>
+              {idx === 0 && (
+                <td rowSpan={items.length + (addingTo === scannedCode ? 1 : 0)} className="align-top font-mono text-xs font-medium" style={{ verticalAlign: 'top', paddingTop: 12 }}>
+                  {scannedCode}
+                  <button
+                    onClick={() => { setAddingTo(addingTo === scannedCode ? null : scannedCode); setNewCredit(''); }}
+                    className="block mt-1 text-[10px] text-[var(--primary)] font-medium flex items-center gap-0.5 hover:underline"
+                    style={{ fontFamily: 'var(--font-body)' }}
+                  >
+                    <Plus size={9} /> add credit
+                  </button>
+                </td>
+              )}
+              {editingId === c.id ? (
+                <>
+                  <td>
+                    <SearchableCodeInput codes={allCodes} value={editCode} onChange={setEditCode} placeholder="Code..." />
+                  </td>
+                  <td>
+                    <input className="input text-xs" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Notes" />
+                  </td>
+                  <td>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={async () => { await onUpdate(c.id, { also_credit_code: editCode, notes: editNotes || null }); setEditingId(null); }}
+                        className="p-1.5 rounded hover:bg-green-50 text-[var(--success)] transition-colors"
+                      ><Check size={13} /></button>
+                      <button onClick={() => setEditingId(null)} className="p-1.5 rounded hover:bg-gray-100 text-[var(--muted)] transition-colors">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </>
+              ) : (
+                <>
+                  <td><span className="font-mono text-xs font-medium" style={{ color: 'var(--primary)' }}>{c.also_credit_code}</span></td>
+                  <td className="text-xs text-[var(--muted)]">{c.notes || '—'}</td>
+                  <td>
+                    <div className="flex gap-0.5">
+                      <button
+                        onClick={() => { setEditingId(c.id); setEditCode(c.also_credit_code); setEditNotes(c.notes || ''); }}
+                        className="p-1.5 rounded hover:bg-blue-50 text-[var(--muted-light)] hover:text-[var(--primary)] transition-colors"
+                      ><Pencil size={13} /></button>
+                      <button onClick={() => onDelete(c.id)}
+                        className="p-1.5 rounded hover:bg-red-50 text-[var(--muted-light)] hover:text-[var(--error)] transition-colors">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </>
+              )}
+            </tr>
+          )).concat(
+            addingTo === scannedCode ? [(
+              <tr key={`add-${scannedCode}`}>
+                <td>
+                  <SearchableCodeInput codes={allCodes} value={newCredit} onChange={setNewCredit} placeholder="Credit code..." />
+                </td>
+                <td></td>
+                <td>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={async () => { if (newCredit) { await onAddCredit(scannedCode, newCredit); setAddingTo(null); setNewCredit(''); } }}
+                      disabled={!newCredit}
+                      className="p-1.5 rounded hover:bg-green-50 text-[var(--success)] transition-colors disabled:opacity-30"
+                    ><Check size={13} /></button>
+                    <button onClick={() => setAddingTo(null)} className="p-1.5 rounded hover:bg-gray-100 text-[var(--muted)] transition-colors">
+                      <X size={13} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            )] : []
+          )
+        ))}
+      </tbody>
+    </table>
   );
 }
 
