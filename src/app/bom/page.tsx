@@ -11,9 +11,12 @@ import {
 } from 'lucide-react';
 import type { BomMapping, ComponentChain } from '@/types';
 
+interface CatalogItem { part_number: string; description: string }
+
 export default function BomPage() {
   const [mappings, setMappings]   = useState<BomMapping[]>([]);
   const [chains, setChains]       = useState<ComponentChain[]>([]);
+  const [catalog, setCatalog]     = useState<CatalogItem[]>([]);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
   const [selectedWip, setSelectedWip] = useState<string | null>(null);
@@ -28,12 +31,14 @@ export default function BomPage() {
 
   async function load() {
     setLoading(true);
-    const [wRes, cRes] = await Promise.all([
+    const [wRes, cRes, catRes] = await Promise.all([
       fetch('/api/bom/mappings'),
       fetch('/api/bom/chains'),
+      fetch('/api/components?active=true'),
     ]);
     if (wRes.ok) setMappings(await wRes.json());
     if (cRes.ok) setChains(await cRes.json());
+    if (catRes.ok) setCatalog(await catRes.json());
     setLoading(false);
   }
 
@@ -59,15 +64,12 @@ export default function BomPage() {
     return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0]));
   }, [chains]);
 
-  // All unique codes for searchable dropdowns (WIP codes + component codes)
-  const allCodes = useMemo(() => {
-    const codes = new Set<string>();
-    for (const m of mappings) {
-      codes.add(m.wip_code);
-      codes.add(m.component_code);
-    }
-    return [...codes].sort();
-  }, [mappings]);
+  // Catalog items for searchable dropdowns (Pastel inventory product codes + descriptions)
+  const catalogItems = useMemo(() =>
+    catalog.map(c => ({ code: c.part_number, description: c.description }))
+      .sort((a, b) => a.code.localeCompare(b.code)),
+    [catalog],
+  );
 
   // Optimistic update helpers
   const handleSaveMapping = useCallback(async (id: string, data: Partial<BomMapping>) => {
@@ -223,7 +225,7 @@ export default function BomPage() {
               {showAddChain && (
                 <div className="p-4 border-b" style={{ borderColor: 'var(--card-border)', background: 'rgba(37,99,235,0.03)' }}>
                   <AddChainForm
-                    allCodes={allCodes}
+                    catalogItems={catalogItems}
                     onSave={async (data) => {
                       // Save each credit code as a separate row
                       for (const code of data.also_credit_codes) {
@@ -259,7 +261,7 @@ export default function BomPage() {
               ) : (
                 <ChainTable
                   groupedChains={groupedChains}
-                  allCodes={allCodes}
+                  catalogItems={catalogItems}
                   onDelete={handleDeleteChain}
                   onUpdate={async (id, data) => {
                     const res = await fetch(`/api/bom/chains/${id}`, {
@@ -289,10 +291,10 @@ export default function BomPage() {
 
 // ── Inline sub-components ───────────────────────────────────────────────────
 
-function AddChainForm({ onSave, onCancel, allCodes }: {
+function AddChainForm({ onSave, onCancel, catalogItems }: {
   onSave: (data: { scanned_code: string; also_credit_codes: string[]; notes?: string }) => Promise<void>;
   onCancel: () => void;
-  allCodes: string[];
+  catalogItems: { code: string; description: string }[];
 }) {
   const [scanned, setScanned] = useState('');
   const [creditCodes, setCreditCodes] = useState<string[]>(['']);
@@ -323,7 +325,7 @@ function AddChainForm({ onSave, onCancel, allCodes }: {
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-[10px] font-semibold text-[var(--muted)] block mb-1" style={{ fontFamily: 'var(--font-display)' }}>When Scanned</label>
-          <SearchableCodeInput codes={allCodes} value={scanned} onChange={setScanned} placeholder="Search item code..." />
+          <SearchableCodeInput items={catalogItems} value={scanned} onChange={setScanned} placeholder="Search product code..." />
         </div>
         <div>
           <label className="text-[10px] font-semibold text-[var(--muted)] block mb-1" style={{ fontFamily: 'var(--font-display)' }}>Notes</label>
@@ -337,7 +339,7 @@ function AddChainForm({ onSave, onCancel, allCodes }: {
           {creditCodes.map((code, idx) => (
             <div key={idx} className="flex items-center gap-2">
               <div className="flex-1">
-                <SearchableCodeInput codes={allCodes} value={code} onChange={v => updateCredit(idx, v)} placeholder="Search item code..." />
+                <SearchableCodeInput items={catalogItems} value={code} onChange={v => updateCredit(idx, v)} placeholder="Search product code..." />
               </div>
               {creditCodes.length > 1 && (
                 <button onClick={() => removeCreditRow(idx)} className="p-1.5 rounded hover:bg-red-50 text-[var(--muted-light)] hover:text-[var(--error)] transition-colors">
@@ -364,9 +366,9 @@ function AddChainForm({ onSave, onCancel, allCodes }: {
   );
 }
 
-function ChainTable({ groupedChains, allCodes, onDelete, onUpdate, onAddCredit }: {
+function ChainTable({ groupedChains, catalogItems, onDelete, onUpdate, onAddCredit }: {
   groupedChains: [string, ComponentChain[]][];
-  allCodes: string[];
+  catalogItems: { code: string; description: string }[];
   onDelete: (id: string) => void;
   onUpdate: (id: string, data: Partial<ComponentChain>) => Promise<void>;
   onAddCredit: (scannedCode: string, creditCode: string, notes?: string) => Promise<void>;
@@ -376,6 +378,8 @@ function ChainTable({ groupedChains, allCodes, onDelete, onUpdate, onAddCredit }
   const [editNotes, setEditNotes] = useState('');
   const [addingTo, setAddingTo] = useState<string | null>(null);
   const [newCredit, setNewCredit] = useState('');
+
+  const descFor = (code: string) => catalogItems.find(i => i.code === code)?.description || '';
 
   return (
     <table className="data-table">
@@ -392,8 +396,9 @@ function ChainTable({ groupedChains, allCodes, onDelete, onUpdate, onAddCredit }
           items.map((c, idx) => (
             <tr key={c.id}>
               {idx === 0 && (
-                <td rowSpan={items.length + (addingTo === scannedCode ? 1 : 0)} className="align-top font-mono text-xs font-medium" style={{ verticalAlign: 'top', paddingTop: 12 }}>
-                  {scannedCode}
+                <td rowSpan={items.length + (addingTo === scannedCode ? 1 : 0)} className="align-top" style={{ verticalAlign: 'top', paddingTop: 12 }}>
+                  <div className="font-mono text-xs font-medium">{scannedCode}</div>
+                  <div className="text-[10px] text-[var(--muted)] truncate max-w-[180px]" title={descFor(scannedCode)}>{descFor(scannedCode)}</div>
                   <button
                     onClick={() => { setAddingTo(addingTo === scannedCode ? null : scannedCode); setNewCredit(''); }}
                     className="block mt-1 text-[10px] text-[var(--primary)] font-medium flex items-center gap-0.5 hover:underline"
@@ -406,7 +411,7 @@ function ChainTable({ groupedChains, allCodes, onDelete, onUpdate, onAddCredit }
               {editingId === c.id ? (
                 <>
                   <td>
-                    <SearchableCodeInput codes={allCodes} value={editCode} onChange={setEditCode} placeholder="Code..." />
+                    <SearchableCodeInput items={catalogItems} value={editCode} onChange={setEditCode} placeholder="Search product code..." />
                   </td>
                   <td>
                     <input className="input text-xs" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Notes" />
@@ -425,7 +430,10 @@ function ChainTable({ groupedChains, allCodes, onDelete, onUpdate, onAddCredit }
                 </>
               ) : (
                 <>
-                  <td><span className="font-mono text-xs font-medium" style={{ color: 'var(--primary)' }}>{c.also_credit_code}</span></td>
+                  <td>
+                    <div className="font-mono text-xs font-medium" style={{ color: 'var(--primary)' }}>{c.also_credit_code}</div>
+                    <div className="text-[10px] text-[var(--muted)] truncate max-w-[180px]" title={descFor(c.also_credit_code)}>{descFor(c.also_credit_code)}</div>
+                  </td>
                   <td className="text-xs text-[var(--muted)]">{c.notes || '—'}</td>
                   <td>
                     <div className="flex gap-0.5">
@@ -446,7 +454,7 @@ function ChainTable({ groupedChains, allCodes, onDelete, onUpdate, onAddCredit }
             addingTo === scannedCode ? [(
               <tr key={`add-${scannedCode}`}>
                 <td>
-                  <SearchableCodeInput codes={allCodes} value={newCredit} onChange={setNewCredit} placeholder="Credit code..." />
+                  <SearchableCodeInput items={catalogItems} value={newCredit} onChange={setNewCredit} placeholder="Search product code..." />
                 </td>
                 <td></td>
                 <td>
@@ -470,8 +478,8 @@ function ChainTable({ groupedChains, allCodes, onDelete, onUpdate, onAddCredit }
   );
 }
 
-function SearchableCodeInput({ codes, value, onChange, placeholder }: {
-  codes: string[];
+function SearchableCodeInput({ items, value, onChange, placeholder }: {
+  items: { code: string; description: string }[];
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
@@ -479,11 +487,17 @@ function SearchableCodeInput({ codes, value, onChange, placeholder }: {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
 
+  // Find description for the current value
+  const selectedDesc = useMemo(() => {
+    if (!value) return '';
+    return items.find(i => i.code === value)?.description || '';
+  }, [items, value]);
+
   const filtered = useMemo(() => {
     const q = (search || value).toLowerCase();
-    if (!q) return codes.slice(0, 50);
-    return codes.filter(c => c.toLowerCase().includes(q)).slice(0, 50);
-  }, [codes, search, value]);
+    if (!q) return items.slice(0, 50);
+    return items.filter(i => i.code.toLowerCase().includes(q) || i.description.toLowerCase().includes(q)).slice(0, 50);
+  }, [items, search, value]);
 
   return (
     <div className="relative">
@@ -495,19 +509,26 @@ function SearchableCodeInput({ codes, value, onChange, placeholder }: {
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 200)}
       />
+      {/* Show description of selected item */}
+      {value && selectedDesc && !open && (
+        <div className="text-[10px] text-[var(--muted)] mt-0.5 truncate" title={selectedDesc}>
+          {selectedDesc}
+        </div>
+      )}
       {open && filtered.length > 0 && (
         <div
           className="absolute z-20 left-0 right-0 mt-1 rounded-lg border shadow-lg overflow-y-auto"
-          style={{ background: 'var(--card)', borderColor: 'var(--card-border)', maxHeight: 200 }}
+          style={{ background: 'var(--card)', borderColor: 'var(--card-border)', maxHeight: 240 }}
         >
-          {filtered.map(code => (
+          {filtered.map(item => (
             <button
-              key={code}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono hover:bg-[var(--background)] transition-colors"
-              style={{ color: code === value ? 'var(--primary)' : 'var(--foreground)' }}
-              onMouseDown={() => { onChange(code); setSearch(''); setOpen(false); }}
+              key={item.code}
+              className="w-full text-left px-3 py-1.5 hover:bg-[var(--background)] transition-colors"
+              style={{ color: item.code === value ? 'var(--primary)' : 'var(--foreground)' }}
+              onMouseDown={() => { onChange(item.code); setSearch(''); setOpen(false); }}
             >
-              {code}
+              <div className="text-xs font-mono font-medium">{item.code}</div>
+              <div className="text-[10px] text-[var(--muted)] truncate">{item.description}</div>
             </button>
           ))}
           {filtered.length === 0 && (
