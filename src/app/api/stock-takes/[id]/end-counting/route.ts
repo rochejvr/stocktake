@@ -44,7 +44,20 @@ export async function POST(
   const { data: sessions } = await sessionQuery;
   const sessionIds = (sessions || []).map(s => s.id);
 
-  // Aggregate scan records by barcode+store, split direct vs chain
+  // Load BOM mappings for WIP explosion (WIP → component parts)
+  const { data: bomMappings } = await supabase
+    .from('bom_mappings')
+    .select('wip_code, component_code, qty_per_wip');
+
+  const bomLookup: Record<string, Array<{ component_code: string; qty_per_wip: number }>> = {};
+  if (bomMappings) {
+    for (const bom of bomMappings) {
+      if (!bomLookup[bom.wip_code]) bomLookup[bom.wip_code] = [];
+      bomLookup[bom.wip_code].push({ component_code: bom.component_code, qty_per_wip: bom.qty_per_wip });
+    }
+  }
+
+  // Aggregate scan records by barcode+store, split direct vs WIP
   // Key format: "barcode|store_code"
   const scanDirect: Record<string, number> = {};
   const scanWip: Record<string, number> = {};
@@ -56,13 +69,27 @@ export async function POST(
       .in('session_id', sessionIds);
 
     for (const r of (records || [])) {
-      const key = `${r.barcode}|${r.store_code || '001'}`;
+      const store = r.store_code || '001';
       const qty = r.quantity;
-      scanTotals[key] = (scanTotals[key] || 0) + qty;
+
       if (r.chained_from) {
+        // Chain credits → WIP column for the scanned barcode
+        const key = `${r.barcode}|${store}`;
         scanWip[key] = (scanWip[key] || 0) + qty;
+        scanTotals[key] = (scanTotals[key] || 0) + qty;
+      } else if (bomLookup[r.barcode]) {
+        // WIP scan → explode into component parts via BOM mapping
+        for (const comp of bomLookup[r.barcode]) {
+          const compKey = `${comp.component_code}|${store}`;
+          const compQty = qty * comp.qty_per_wip;
+          scanWip[compKey] = (scanWip[compKey] || 0) + compQty;
+          scanTotals[compKey] = (scanTotals[compKey] || 0) + compQty;
+        }
       } else {
+        // Direct part scan → Part column
+        const key = `${r.barcode}|${store}`;
         scanDirect[key] = (scanDirect[key] || 0) + qty;
+        scanTotals[key] = (scanTotals[key] || 0) + qty;
       }
     }
   }
