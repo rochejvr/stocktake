@@ -27,7 +27,7 @@ export default function ReconcilePage() {
   const [hideZeroZero, setHideZeroZero] = useState(true);
   const [showRecountList, setShowRecountList] = useState(false);
   const [recountItems, setRecountItems] = useState<Array<CountResult & {
-    related_wip_codes: Array<{ wip_code: string; notes: string | null }>;
+    related_wip_codes: Array<{ wip_code: string; notes: string | null; count1_qty: number }>;
     related_chain_codes: string[];
   }>>([]);
   const [recountSelection, setRecountSelection] = useState<Set<string>>(new Set());
@@ -511,7 +511,21 @@ export default function ReconcilePage() {
                               </div>
                             </td>
                             <td className="px-2 py-2 font-mono text-[11px]">
-                              {uniqueRelated.length > 0 ? uniqueRelated.join(', ') : '—'}
+                              {uniqueRelated.length > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {item.related_wip_codes.map(w => {
+                                    const active = w.count1_qty > 0;
+                                    return (
+                                      <span key={w.wip_code} className={active ? 'font-bold text-[var(--foreground)]' : 'text-[var(--muted)]'}>
+                                        {w.wip_code}
+                                      </span>
+                                    );
+                                  })}
+                                  {item.related_chain_codes.map(c => (
+                                    <span key={c} className="text-[var(--muted)]">{c}</span>
+                                  ))}
+                                </div>
+                              ) : '—'}
                             </td>
                           </tr>
                         );

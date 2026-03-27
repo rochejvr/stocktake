@@ -28,13 +28,20 @@ export async function POST(
   const countNumber = isRecount ? 2 : 1;
   const countCol = isRecount ? 'count2_qty' : 'count1_qty';
 
-  // 2. Get all scan records for this count number
-  const { data: sessions } = await supabase
+  // 2. Get scan sessions for this count number
+  // For recounts: only use unsubmitted sessions (current recount round)
+  // This prevents adding old recount records to new ones
+  let sessionQuery = supabase
     .from('scan_sessions')
     .select('id')
     .eq('stock_take_id', id)
     .eq('count_number', countNumber);
 
+  if (isRecount) {
+    sessionQuery = sessionQuery.is('submitted_at', null);
+  }
+
+  const { data: sessions } = await sessionQuery;
   const sessionIds = (sessions || []).map(s => s.id);
 
   // Aggregate scan records by barcode+store, split direct vs chain
@@ -194,7 +201,15 @@ export async function POST(
     }
   }
 
-  // 5. Advance status
+  // 5. Mark sessions as submitted so they aren't re-aggregated on next recount
+  if (sessionIds.length > 0) {
+    await supabase
+      .from('scan_sessions')
+      .update({ submitted_at: new Date().toISOString() })
+      .in('id', sessionIds);
+  }
+
+  // 6. Advance status
   const newStatus = (!isRecount && flaggedCount > 0) ? 'recount' : 'reviewing';
   const update: Record<string, unknown> = { status: newStatus };
   if (newStatus === 'reviewing') {

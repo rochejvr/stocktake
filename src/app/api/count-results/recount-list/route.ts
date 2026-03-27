@@ -55,10 +55,30 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Enrich flagged items with WIP codes
+  // Get count1 quantities for related WIP codes so UI can bold active ones
+  const allWipCodes = [...new Set(Object.values(wipLookup).flatMap(wips => wips.map(w => w.wip_code)))];
+  const wipCounts: Record<string, number> = {};
+  if (allWipCodes.length > 0) {
+    const { data: wipResults } = await supabase
+      .from('count_results')
+      .select('part_number, count1_qty')
+      .eq('stock_take_id', stockTakeId)
+      .in('part_number', allWipCodes);
+    if (wipResults) {
+      for (const wr of wipResults) {
+        // Sum across stores
+        wipCounts[wr.part_number] = (wipCounts[wr.part_number] || 0) + (wr.count1_qty ?? 0);
+      }
+    }
+  }
+
+  // Enrich flagged items with WIP codes + their count1 qty
   const enriched = flagged.map(r => ({
     ...r,
-    related_wip_codes: wipLookup[r.part_number] || [],
+    related_wip_codes: (wipLookup[r.part_number] || []).map(w => ({
+      ...w,
+      count1_qty: wipCounts[w.wip_code] ?? 0,
+    })),
     related_chain_codes: chainLookup[r.part_number] || [],
   }));
 
