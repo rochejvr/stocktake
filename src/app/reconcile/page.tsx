@@ -314,24 +314,29 @@ export default function ReconcilePage() {
     const rows: string[] = [];
 
     for (const item of selected) {
-      const wipCodes = item.related_wip_codes.map(w => w.wip_code);
-      const chainCodes = item.related_chain_codes;
-      wipCodes.forEach(w => allWipCodes.add(w));
+      const wipCodes = item.related_wip_codes.map(w => {
+        const active = w.count1_qty > 0;
+        return `<div style="${active ? 'font-weight:bold' : 'color:#999'}">${w.wip_code}</div>`;
+      });
+      wipCodes.forEach(() => {}); // just for WIP codes display
+      const lastCount = item.count2_qty ?? item.count1_qty;
+      const reasonBadge = item.is_chain_parent
+        ? '<span style="background:#dbeafe;color:#1d4ed8;padding:1px 6px;border-radius:8px;font-size:10px">Chain parent</span>'
+        : (item.recount_reasons || []).map((r: string) => `<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px">${REASON_LABELS[r]?.split(' ').slice(0, 3).join(' ') || r}</span>`).join(' ');
 
       rows.push(`<tr>
         <td style="padding:4px 8px;border:1px solid #ddd;font-family:monospace">${item.part_number}</td>
         <td style="padding:4px 8px;border:1px solid #ddd">${item.description}</td>
         <td style="padding:4px 8px;border:1px solid #ddd">${STORE_LABELS[item.store_code] || item.store_code}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd;text-align:right">${item.pastel_qty}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd;text-align:right">${item.count1_qty ?? '—'}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd;text-align:right;color:${(item.variance_qty ?? 0) < 0 ? 'red' : '#333'}">${item.variance_qty ?? '—'}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd;font-family:monospace;font-size:11px">${[...wipCodes, ...chainCodes].join(', ') || '—'}</td>
+        <td style="padding:4px 8px;border:1px solid #ddd;text-align:right">${lastCount ?? '—'}</td>
+        <td style="padding:4px 8px;border:1px solid #ddd">${reasonBadge}</td>
+        <td style="padding:4px 8px;border:1px solid #ddd;font-family:monospace;font-size:11px">${wipCodes.length > 0 ? wipCodes.join('') : '—'}</td>
         <td style="padding:4px 8px;border:1px solid #ddd"></td>
       </tr>`);
     }
 
     printWindow.document.write(`<!DOCTYPE html><html><head><title>Recount List — ${stockTake?.reference}</title>
-      <style>body{font-family:Arial,sans-serif;padding:20px}table{border-collapse:collapse;width:100%}th{background:#f5f5f5;padding:6px 8px;border:1px solid #ddd;text-align:left;font-size:11px;text-transform:uppercase}td{font-size:12px}@media print{body{padding:0}}</style>
+      <style>body{font-family:Arial,sans-serif;padding:20px}table{border-collapse:collapse;width:100%}th{background:#f5f5f5;padding:6px 8px;border:1px solid #ddd;text-align:left;font-size:11px;text-transform:uppercase}td{font-size:12px;vertical-align:top}@media print{body{padding:0}}</style>
     </head><body>
       <h2 style="margin-bottom:4px">Recount List</h2>
       <p style="color:#666;margin-top:0">${stockTake?.reference} — ${stockTake?.name} — ${new Date().toLocaleDateString()}</p>
@@ -339,8 +344,8 @@ export default function ReconcilePage() {
       <table>
         <thead><tr>
           <th>Part Number</th><th>Description</th><th>Store</th>
-          <th style="text-align:right">Pastel</th><th style="text-align:right">Count 1</th>
-          <th style="text-align:right">Variance</th><th>Related WIP Codes</th><th>Count 2</th>
+          <th style="text-align:right">Last Count</th>
+          <th>Reasons</th><th>Related WIP Codes</th><th>New Count</th>
         </tr></thead>
         <tbody>${rows.join('')}</tbody>
       </table>
@@ -464,9 +469,7 @@ export default function ReconcilePage() {
                         <th className="text-left px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Part Number</th>
                         <th className="text-left px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Description</th>
                         <th className="text-left px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Store</th>
-                        <th className="text-right px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Pastel</th>
-                        <th className="text-right px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Count 1</th>
-                        <th className="text-right px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Variance</th>
+                        <th className="text-right px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Last Count</th>
                         <th className="text-left px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Reasons</th>
                         <th className="text-left px-2 py-2 text-[10px] font-semibold text-[var(--muted)] uppercase">Related WIP Codes</th>
                       </tr>
@@ -495,13 +498,7 @@ export default function ReconcilePage() {
                             <td className="px-2 py-2 font-mono font-medium">{item.part_number}</td>
                             <td className="px-2 py-2 text-[var(--muted)]">{item.description}</td>
                             <td className="px-2 py-2 text-[var(--muted)]">{STORE_LABELS[item.store_code] || item.store_code}</td>
-                            <td className="px-2 py-2 text-right font-mono">{item.pastel_qty}</td>
-                            <td className="px-2 py-2 text-right font-mono">{item.count1_qty ?? '—'}</td>
-                            <td className="px-2 py-2 text-right font-mono font-bold" style={{
-                              color: (item.variance_qty ?? 0) < 0 ? 'var(--error)' : (item.variance_qty ?? 0) > 0 ? '#22c55e' : 'var(--muted)',
-                            }}>
-                              {item.variance_qty !== null ? (item.variance_qty > 0 ? '+' : '') + item.variance_qty : '—'}
-                            </td>
+                            <td className="px-2 py-2 text-right font-mono">{item.count2_qty ?? item.count1_qty ?? '—'}</td>
                             <td className="px-2 py-2">
                               <div className="flex flex-wrap gap-1">
                                 {item.is_chain_parent && (

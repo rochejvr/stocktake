@@ -27,12 +27,13 @@ export async function GET(request: NextRequest) {
     .select('wip_code, component_code, notes')
     .in('component_code', partNumbers);
 
-  // Build WIP lookup: component_code → Set of WIP codes
+  // Build WIP lookup: component_code → Set of WIP codes (only actual WIPs, not XM parts)
   const wipLookup: Record<string, Array<{ wip_code: string; notes: string | null }>> = {};
   if (bomMappings) {
     for (const bom of bomMappings) {
+      // Only include actual WIP codes — XM parts that contain other XMs are handled as chain parents
+      if (bom.wip_code.startsWith('XM')) continue;
       if (!wipLookup[bom.component_code]) wipLookup[bom.component_code] = [];
-      // Deduplicate WIP codes per component
       if (!wipLookup[bom.component_code].some(w => w.wip_code === bom.wip_code)) {
         wipLookup[bom.component_code].push({ wip_code: bom.wip_code, notes: bom.notes });
       }
@@ -80,6 +81,7 @@ export async function GET(request: NextRequest) {
       .in('component_code', newParentCodes);
     if (parentBom) {
       for (const bom of parentBom) {
+        if (bom.wip_code.startsWith('XM')) continue;
         if (!wipLookup[bom.component_code]) wipLookup[bom.component_code] = [];
         if (!wipLookup[bom.component_code].some(w => w.wip_code === bom.wip_code)) {
           wipLookup[bom.component_code].push({ wip_code: bom.wip_code, notes: bom.notes });
