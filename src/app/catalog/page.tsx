@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { AppShell } from '@/components/layout/AppShell';
 import { Search, Database, CheckCircle, XCircle, Package } from 'lucide-react';
 
 interface CatalogItem {
@@ -38,7 +37,7 @@ export default function CatalogPage() {
   const inactiveCount = items.filter(i => !i.active).length;
 
   return (
-    <AppShell>
+    <>
       <div className="p-8 ">
         {/* Header */}
         <div className="flex items-start justify-between mb-6">
@@ -129,6 +128,6 @@ export default function CatalogPage() {
           )}
         </div>
       </div>
-    </AppShell>
+    </>
   );
 }

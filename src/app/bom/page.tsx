@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { AppShell } from '@/components/layout/AppShell';
 import { BomStatsBar } from '@/components/bom/BomStatsBar';
 import { WipMasterList } from '@/components/bom/WipMasterList';
 import { WipDetailPanel } from '@/components/bom/WipDetailPanel';
@@ -94,16 +93,16 @@ export default function BomPage() {
 
   if (loading) {
     return (
-      <AppShell>
+      <>
         <div className="p-8 flex items-center justify-center h-64">
           <div className="w-6 h-6 border-2 border-[var(--primary)] border-t-transparent rounded-full animate-spin" />
         </div>
-      </AppShell>
+      </>
     );
   }
 
   return (
-    <AppShell>
+    <>
       <div className="p-8 space-y-5 fade-in">
         {/* Header */}
         <div className="flex items-start justify-between">
@@ -256,7 +255,7 @@ export default function BomPage() {
           )}
         </div>
       </div>
-    </AppShell>
+    </>
   );
 }
 

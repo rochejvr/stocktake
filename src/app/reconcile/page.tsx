@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { AppShell } from '@/components/layout/AppShell';
 import {
   AlertTriangle, Check, ChevronDown, ChevronUp, Filter,
   Search, ArrowUpDown, CheckCircle, XCircle, Flag, Printer, ListChecks,
@@ -350,7 +349,7 @@ export default function ReconcilePage() {
   };
 
   return (
-    <AppShell>
+    <>
       <div className="p-8">
         {loading && (
           <div className="flex items-center justify-center h-64 text-[var(--muted)]">
@@ -664,7 +663,7 @@ export default function ReconcilePage() {
           </div>
         )}
       </div>
-    </AppShell>
+    </>
   );
 }
 

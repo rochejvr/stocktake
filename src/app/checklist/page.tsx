@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { AppShell } from '@/components/layout/AppShell';
 import { ObservationModal } from '@/components/checklist/ObservationModal';
 import {
   ClipboardList, Check, AlertTriangle, Shield, ChevronDown, ChevronRight,
@@ -203,17 +202,17 @@ export default function ChecklistPage() {
 
   if (loading) {
     return (
-      <AppShell>
+      <>
         <div className="p-8 flex items-center justify-center h-64">
           <div className="w-6 h-6 border-2 border-[var(--primary)] border-t-transparent rounded-full animate-spin" />
         </div>
-      </AppShell>
+      </>
     );
   }
 
   if (!stockTake) {
     return (
-      <AppShell>
+      <>
         <div className="p-8 flex items-center justify-center h-64">
           <div className="text-center text-[var(--muted)]">
             <ClipboardList size={32} className="mx-auto mb-3 opacity-30" />
@@ -221,12 +220,12 @@ export default function ChecklistPage() {
             <div className="text-sm mt-1">Create a stock take in Setup to begin the checklist.</div>
           </div>
         </div>
-      </AppShell>
+      </>
     );
   }
 
   return (
-    <AppShell>
+    <>
       <div className="p-8 space-y-6 fade-in">
         {/* Header */}
         <div className="flex items-start justify-between">
@@ -484,7 +483,7 @@ export default function ChecklistPage() {
           onClose={() => setObsModal({ open: false, department: 'Finance' })}
         />
       )}
-    </AppShell>
+    </>
   );
 }
 

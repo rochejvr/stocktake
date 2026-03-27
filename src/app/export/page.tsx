@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { AppShell } from '@/components/layout/AppShell';
 import {
   Download, FileSpreadsheet, AlertTriangle, CheckCircle, Settings,
 } from 'lucide-react';
@@ -125,7 +124,7 @@ export default function ExportPage() {
   const rowCount = includeZero ? stats?.totalAccepted : stats?.withVariance;
 
   return (
-    <AppShell>
+    <>
       <div className="p-8">
         {loading && (
           <div className="flex items-center justify-center h-64 text-[var(--muted)]">
@@ -355,7 +354,7 @@ export default function ExportPage() {
           </div>
         )}
       </div>
-    </AppShell>
+    </>
   );
 }
 

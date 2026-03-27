@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AppShell } from '@/components/layout/AppShell';
 import { StockTakeClock } from '@/components/shared/StockTakeClock';
 import { ScanQRCard } from '@/components/shared/ScanQRCard';
 import {
@@ -70,7 +69,7 @@ export default function OverviewPage() {
   };
 
   return (
-    <AppShell>
+    <>
       <div className="p-8 ">
         {loading && (
           <div className="flex items-center justify-center h-64 text-[var(--muted)]">
@@ -206,7 +205,7 @@ export default function OverviewPage() {
           </div>
         )}
       </div>
-    </AppShell>
+    </>
   );
 }
 

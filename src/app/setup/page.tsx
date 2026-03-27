@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { AppShell } from '@/components/layout/AppShell';
 import { Upload, Check, AlertTriangle, Loader, RefreshCw, X } from 'lucide-react';
 import { buildReference } from '@/lib/constants';
 import { startOfToday, setHours } from 'date-fns';
@@ -121,7 +120,7 @@ export default function SetupPage() {
   const canSave = !!preview && uniqueParts > 0 && !parsing;
 
   return (
-    <AppShell>
+    <>
       <div className="p-8">
         <div className="mb-8">
           <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>
@@ -239,7 +238,7 @@ export default function SetupPage() {
           </button>
         )}
       </div>
-    </AppShell>
+    </>
   );
 }
 
