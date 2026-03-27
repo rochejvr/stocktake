@@ -321,25 +321,25 @@ function AddChainForm({ onSave, onCancel, catalogItems, descFor }: {
         <label className="text-[10px] font-medium text-[var(--muted)] mb-2 block">Also credit these products</label>
         <div className="space-y-2">
           {credits.map((credit, idx) => (
-            <div key={idx} className="flex items-start gap-3 p-2.5 rounded-lg border" style={{ borderColor: 'var(--card-border)', background: 'var(--card)' }}>
-              <div className="flex-1 min-w-0">
-                <div className="max-w-xs">
+            <div key={idx} className="p-2.5 rounded-lg border" style={{ borderColor: 'var(--card-border)', background: 'var(--card)', maxWidth: 480 }}>
+              <div className="flex items-end gap-2">
+                <div className="flex-1 min-w-0">
                   <SearchableCodeInput items={catalogItems} value={credit.code} onChange={v => setCredits(prev => prev.map((c, i) => i === idx ? { ...c, code: v } : c))} placeholder="Search product code..." />
                 </div>
-                {credit.code && <div className="text-[10px] text-[var(--muted)] mt-0.5 ml-0.5">{descFor(credit.code)}</div>}
-              </div>
-              <div className="shrink-0 text-center">
-                <label className="text-[9px] text-[var(--muted)] block mb-0.5">Qty</label>
-                <input type="number" className="input font-mono text-xs text-center" style={{ width: 52 }}
-                  value={credit.qty} onChange={e => setCredits(prev => prev.map((c, i) => i === idx ? { ...c, qty: parseFloat(e.target.value) || 1 } : c))}
-                  min={0.01} step="any" />
-              </div>
-              {credits.length > 1 && (
-                <button onClick={() => setCredits(prev => prev.filter((_, i) => i !== idx))}
-                  className="p-1 mt-3 rounded hover:bg-red-50 text-[var(--muted-light)] hover:text-[var(--error)] transition-colors shrink-0">
-                  <Trash2 size={12} />
-                </button>
+                <div className="shrink-0">
+                  <label className="text-[9px] text-[var(--muted)] block mb-0.5">Qty</label>
+                  <input type="number" className="input font-mono text-xs text-center" style={{ width: 52 }}
+                    value={credit.qty} onChange={e => setCredits(prev => prev.map((c, i) => i === idx ? { ...c, qty: parseFloat(e.target.value) || 1 } : c))}
+                    min={0.01} step="any" />
+                </div>
+                {credits.length > 1 && (
+                  <button onClick={() => setCredits(prev => prev.filter((_, i) => i !== idx))}
+                    className="p-1 rounded hover:bg-red-50 text-[var(--muted-light)] hover:text-[var(--error)] transition-colors shrink-0">
+                    <Trash2 size={12} />
+                  </button>
               )}
+              </div>
+              {credit.code && <div className="text-[10px] text-[var(--muted)] mt-0.5">{descFor(credit.code)}</div>}
             </div>
           ))}
           <button onClick={() => setCredits(prev => [...prev, { code: '', qty: 1 }])}
@@ -430,24 +430,22 @@ function ChainAccordion({ groupedChains, catalogItems, descFor, onDelete, onUpda
                     <div key={c.id}>
                       {editingId === c.id ? (
                         /* ── Edit mode ── */
-                        <div className="p-3 rounded-lg border space-y-2" style={{ borderColor: 'var(--primary)', background: 'rgba(37,99,235,0.03)' }}>
-                          <div className="flex items-start gap-3">
+                        <div className="p-3 rounded-lg border space-y-2" style={{ borderColor: 'var(--primary)', background: 'rgba(37,99,235,0.03)', maxWidth: 480 }}>
+                          <div className="flex items-end gap-2">
                             <div className="flex-1 min-w-0">
                               <label className="text-[9px] text-[var(--muted)] block mb-0.5">Product Code</label>
-                              <div className="max-w-xs">
-                                <SearchableCodeInput items={catalogItems} value={editState.code} onChange={v => setEditState(s => ({ ...s, code: v }))} placeholder="Code..." />
-                              </div>
-                              {editState.code && <div className="text-[10px] text-[var(--muted)] mt-0.5">{descFor(editState.code)}</div>}
+                              <SearchableCodeInput items={catalogItems} value={editState.code} onChange={v => setEditState(s => ({ ...s, code: v }))} placeholder="Code..." />
                             </div>
-                            <div className="shrink-0 text-center">
+                            <div className="shrink-0">
                               <label className="text-[9px] text-[var(--muted)] block mb-0.5">Qty</label>
                               <input type="number" className="input font-mono text-xs text-center" style={{ width: 52 }}
                                 value={editState.qty} onChange={e => setEditState(s => ({ ...s, qty: parseFloat(e.target.value) || 1 }))} min={0.01} step="any" />
                             </div>
                           </div>
+                          {editState.code && <div className="text-[10px] text-[var(--muted)] -mt-1">{descFor(editState.code)}</div>}
                           <div>
                             <label className="text-[9px] text-[var(--muted)] block mb-0.5">Notes</label>
-                            <input className="input text-xs max-w-xs" value={editState.notes} onChange={e => setEditState(s => ({ ...s, notes: e.target.value }))} placeholder="Optional" />
+                            <input className="input text-xs" value={editState.notes} onChange={e => setEditState(s => ({ ...s, notes: e.target.value }))} placeholder="Optional" />
                           </div>
                           <div className="flex gap-2 pt-1">
                             <button className="btn-primary text-[10px] py-1 px-3"
@@ -480,21 +478,19 @@ function ChainAccordion({ groupedChains, catalogItems, descFor, onDelete, onUpda
 
                   {/* Add credit */}
                   {addingTo === scannedCode ? (
-                    <div className="p-3 rounded-lg border space-y-2" style={{ borderColor: 'var(--card-border)', background: 'var(--background)' }}>
-                      <div className="flex items-start gap-3">
+                    <div className="p-3 rounded-lg border space-y-2" style={{ borderColor: 'var(--card-border)', background: 'var(--background)', maxWidth: 480 }}>
+                      <div className="flex items-end gap-2">
                         <div className="flex-1 min-w-0">
                           <label className="text-[9px] text-[var(--muted)] block mb-0.5">Product Code</label>
-                          <div className="max-w-xs">
-                            <SearchableCodeInput items={catalogItems} value={addState.code} onChange={v => setAddState(s => ({ ...s, code: v }))} placeholder="Search product code..." />
-                          </div>
-                          {addState.code && <div className="text-[10px] text-[var(--muted)] mt-0.5">{descFor(addState.code)}</div>}
+                          <SearchableCodeInput items={catalogItems} value={addState.code} onChange={v => setAddState(s => ({ ...s, code: v }))} placeholder="Search product code..." />
                         </div>
-                        <div className="shrink-0 text-center">
+                        <div className="shrink-0">
                           <label className="text-[9px] text-[var(--muted)] block mb-0.5">Qty</label>
                           <input type="number" className="input font-mono text-xs text-center" style={{ width: 52 }}
                             value={addState.qty} onChange={e => setAddState(s => ({ ...s, qty: parseFloat(e.target.value) || 1 }))} min={0.01} step="any" />
                         </div>
                       </div>
+                      {addState.code && <div className="text-[10px] text-[var(--muted)] -mt-1">{descFor(addState.code)}</div>}
                       <div className="flex gap-2">
                         <button className="btn-primary text-[10px] py-1 px-3" disabled={!addState.code}
                           onClick={async () => { await onAddCredit(scannedCode, addState.code, addState.qty); setAddingTo(null); setAddState({ code: '', qty: 1 }); }}>
