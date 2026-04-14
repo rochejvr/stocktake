@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ScanLine, Package, ArrowLeft, Check, X, Link2, Send, Trash2, Camera, Keyboard, Pencil, Warehouse, Delete } from 'lucide-react';
+import { ScanLine, Package, ArrowLeft, Check, X, Link2, Send, Trash2, Camera, Keyboard, Pencil, Warehouse, Delete, Building2 } from 'lucide-react';
 import { CameraScanner } from '@/components/scan/CameraScanner';
 import { DiagnosticScanner } from '@/components/scan/DiagnosticScanner';
 import type { StockTake, ComponentChain } from '@/types';
@@ -26,6 +26,7 @@ interface ScannedItem {
   scannedAt: string;
   storeCode: string;
   chained?: boolean;
+  external?: boolean;
 }
 
 const STORES = [
@@ -79,6 +80,9 @@ export default function ScanPage() {
   const [countNumber, setCountNumber] = useState<1 | 2>(1);
   const [storeCode, setStoreCode] = useState('001');
   const [starting, setStarting] = useState(false);
+
+  // External supplier stock mode
+  const [isExternal, setIsExternal] = useState(false);
 
   // Scanner — camera requires HTTPS, default set in useEffect
   const [scanMode, setScanMode] = useState<'camera' | 'manual'>('manual');
@@ -164,13 +168,18 @@ export default function ScanPage() {
             setRecountParts(parts);
             // Also set chains from the same fetch
             if (Array.isArray(chainsData)) setChains(chainsData as ComponentChain[]);
-          }).catch(() => {});
+          }).catch(() => {
+            setRecountParts(new Set());
+            setError('Could not load recount list. Refresh to retry.');
+          });
         } else {
           // Non-recount: load chains separately
           fetchWithTimeout('/api/bom/chains')
             .then(r => r.json())
             .then(d => setChains(Array.isArray(d) ? d : []))
-            .catch(() => {});
+            .catch(() => {
+              setError('Could not load component chains — chain credits will not work this session.');
+            });
         }
 
         // Check for existing session in localStorage
@@ -346,7 +355,8 @@ export default function ScanPage() {
       }
 
       // Recount mode: warn if part is not flagged for recount in this store
-      if (recountParts && recountParts.size > 0) {
+      // Also triggers on empty set (load failure) — safe mode warns on every scan
+      if (recountParts !== null) {
         const key = `${barcode}|${storeCode}`;
         if (!recountParts.has(key)) {
           const scanAnyway = confirm(
@@ -389,6 +399,7 @@ export default function ScanPage() {
         user_name: string;
         store_code: string;
         chained_from?: string | null;
+        source?: string;
       }> = [
         {
           barcode: pending.barcode,
@@ -397,12 +408,14 @@ export default function ScanPage() {
           user_name: session.userName,
           store_code: storeCode,
           chained_from: null,
+          source: isExternal ? 'external' : 'physical',
         },
       ];
 
       // Check for component chains (one scanned code can credit multiple items)
       // credit_qty is a multiplier: scanned 148 × credit_qty 1 = credit 148
-      const chainMatches = chains.filter(c => c.scanned_code === pending.barcode);
+      // Skip chains for external stock — external is a known qty, not a BOM trigger
+      const chainMatches = isExternal ? [] : chains.filter(c => c.scanned_code === pending.barcode);
       for (const chain of chainMatches) {
         records.push({
           barcode: chain.also_credit_code,
@@ -428,7 +441,7 @@ export default function ScanPage() {
       const primaryRecord = savedRecords.find(r => r.barcode === pending.barcode);
 
       const newItems: ScannedItem[] = [
-        { id: primaryRecord?.id || '', barcode: pending.barcode, description: pending.description, qty: quantity, scannedAt: now, storeCode },
+        { id: primaryRecord?.id || '', barcode: pending.barcode, description: pending.description, qty: quantity, scannedAt: now, storeCode, external: isExternal },
       ];
       for (const chain of chainMatches) {
         const chainRecord = savedRecords.find(r => r.barcode === chain.also_credit_code);
@@ -455,7 +468,7 @@ export default function ScanPage() {
     } finally {
       setSaving(false);
     }
-  }, [pending, session, stockTake, qty, chains]);
+  }, [pending, session, stockTake, qty, chains, isExternal, storeCode]);
 
   // ── Cancel pending ───────────────────────────────────────────────────────
 
@@ -780,6 +793,24 @@ export default function ScanPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
+            {/* External stock toggle */}
+            <button
+              onClick={() => {
+                setIsExternal(prev => {
+                  if (!prev) setScanMode('manual'); // Force manual when entering external mode
+                  return !prev;
+                });
+              }}
+              className="flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-semibold transition-all"
+              style={{
+                borderColor: isExternal ? '#d97706' : 'var(--card-border)',
+                background: isExternal ? '#fef3c7' : 'white',
+                color: isExternal ? '#b45309' : 'var(--muted)',
+              }}
+            >
+              <Building2 size={12} />
+              {isExternal ? 'External' : 'Ext.'}
+            </button>
             {/* Store toggle */}
             <button
               onClick={() => setStoreCode(prev => prev === '001' ? '002' : '001')}
@@ -803,10 +834,18 @@ export default function ScanPage() {
         </div>
       </div>
 
+      {/* External stock banner */}
+      {isExternal && (
+        <div className="mx-4 mt-3 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>
+          <Building2 size={14} />
+          External Stock Mode — entering quantities at suppliers
+        </div>
+      )}
+
       {/* Mode toggle + scanner/input + qty confirmation */}
       <div className="flex-shrink-0 p-4 space-y-3">
         {/* Mode toggle */}
-        {!pending && (
+        {!pending && !isExternal && (
           <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-slate-100">
             <button
               onClick={() => {
@@ -1064,6 +1103,8 @@ export default function ScanPage() {
                 >
                   {item.chained ? (
                     <Link2 size={14} className="text-[var(--muted-light)] flex-shrink-0" />
+                  ) : item.external ? (
+                    <Building2 size={14} className="text-amber-500 flex-shrink-0" />
                   ) : (
                     <Check size={14} className="text-green-500 flex-shrink-0" />
                   )}
@@ -1075,6 +1116,11 @@ export default function ScanPage() {
                       }`}>
                         {item.storeCode === '002' ? 'Q' : 'M'}
                       </span>
+                      {item.external && (
+                        <span className="inline-block text-[9px] font-bold px-1 py-px rounded mr-1 bg-amber-100 text-amber-700">
+                          EXT
+                        </span>
+                      )}
                       {item.description}
                     </div>
                   </div>

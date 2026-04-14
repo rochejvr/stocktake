@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ObservationModal } from '@/components/checklist/ObservationModal';
 import {
   ClipboardList, Check, AlertTriangle, Shield, ChevronDown, ChevronRight,
-  Plus, FileCheck, Lock, Eye, MessageSquare, Lightbulb,
+  Plus, FileCheck, Lock, Eye, MessageSquare, Lightbulb, User, LogOut,
 } from 'lucide-react';
 import type {
   ChecklistItem, ChecklistObservation, ChecklistSignoff,
@@ -26,10 +26,12 @@ const OBS_STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   closed:      { bg: 'var(--success-light)', text: 'var(--success)' },
 };
 
-const TEST_USER = { id: 'test-user', name: 'Test User' };
+const CHECKLIST_USER_KEY = 'stocktake-checklist-user';
 
 export default function ChecklistPage() {
-  const currentUser = TEST_USER;
+  const [userName, setUserName] = useState<string | null>(null);
+  const [nameInput, setNameInput] = useState('');
+  const [userLoaded, setUserLoaded] = useState(false);
   const [stockTake, setStockTake] = useState<StockTake | null>(null);
   const [items, setItems] = useState<ChecklistItem[]>([]);
   const [signoffs, setSignoffs] = useState<ChecklistSignoff[]>([]);
@@ -50,6 +52,26 @@ export default function ChecklistPage() {
   }>({ open: false, department: 'Finance' });
 
   const [viewObsItemId, setViewObsItemId] = useState<string | null>(null);
+
+  // Load user name from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(CHECKLIST_USER_KEY);
+    if (saved) setUserName(saved);
+    setUserLoaded(true);
+  }, []);
+
+  const handleSetUser = () => {
+    const name = nameInput.trim();
+    if (!name) return;
+    localStorage.setItem(CHECKLIST_USER_KEY, name);
+    setUserName(name);
+  };
+
+  const handleChangeUser = () => {
+    localStorage.removeItem(CHECKLIST_USER_KEY);
+    setUserName(null);
+    setNameInput('');
+  };
 
   // Load data
   const loadData = useCallback(async () => {
@@ -92,7 +114,7 @@ export default function ChecklistPage() {
 
   // Toggle item completion
   const toggleItem = async (item: ChecklistItem) => {
-    if (!currentUser || !stockTake) return;
+    if (!userName || !stockTake) return;
 
     const phaseSignedOff = signoffs.some(
       s => s.phase === item.phase && s.department === item.department
@@ -106,7 +128,7 @@ export default function ChecklistPage() {
       body: JSON.stringify(
         isCompleting
           ? {
-              completed_by: currentUser.name,
+              completed_by: userName,
               completed_at: new Date().toISOString(),
             }
           : { clear: true }
@@ -121,7 +143,7 @@ export default function ChecklistPage() {
 
   // Department phase sign-off
   const signOffPhase = async (phase: ChecklistPhase, department: Department) => {
-    if (!currentUser || !stockTake) return;
+    if (!userName || !stockTake) return;
 
     const res = await fetch('/api/checklist/signoffs', {
       method: 'POST',
@@ -130,7 +152,7 @@ export default function ChecklistPage() {
         stock_take_id: stockTake.id,
         phase,
         department,
-        signed_by: currentUser.name,
+        signed_by: userName,
       }),
     });
 
@@ -200,11 +222,48 @@ export default function ChecklistPage() {
     return { done, total: pi.length };
   };
 
-  if (loading) {
+  if (loading || !userLoaded) {
     return (
       <>
         <div className="p-8 flex items-center justify-center h-64">
           <div className="w-6 h-6 border-2 border-[var(--primary)] border-t-transparent rounded-full animate-spin" />
+        </div>
+      </>
+    );
+  }
+
+  if (!userName) {
+    return (
+      <>
+        <div className="p-8 flex items-center justify-center h-64">
+          <div className="card p-6 w-full max-w-sm text-center space-y-4">
+            <div className="flex items-center justify-center gap-2 mb-1">
+              <User size={20} style={{ color: 'var(--primary)' }} />
+              <h2 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)' }}>
+                Who are you?
+              </h2>
+            </div>
+            <p className="text-sm text-[var(--muted)]">
+              Enter your name to sign off checklist items.
+            </p>
+            <input
+              type="text"
+              value={nameInput}
+              onChange={e => setNameInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSetUser()}
+              placeholder="e.g. Roche, Nokuthula, Johan"
+              className="w-full px-3 py-2 border rounded text-sm"
+              style={{ borderColor: 'var(--card-border)', fontFamily: 'var(--font-body)' }}
+              autoFocus
+            />
+            <button
+              onClick={handleSetUser}
+              disabled={!nameInput.trim()}
+              className="btn-primary w-full py-2"
+            >
+              Continue
+            </button>
+          </div>
         </div>
       </>
     );
@@ -239,6 +298,19 @@ export default function ChecklistPage() {
             <p className="text-sm text-[var(--muted)]">
               XAV-FIN-01SF — {stockTake.reference}
             </p>
+            <div className="flex items-center gap-2 mt-1">
+              <User size={12} style={{ color: 'var(--muted)' }} />
+              <span className="text-xs text-[var(--muted)]">
+                Signed in as <strong style={{ color: 'var(--foreground)' }}>{userName}</strong>
+              </span>
+              <button
+                onClick={handleChangeUser}
+                className="text-xs hover:underline"
+                style={{ color: 'var(--primary)' }}
+              >
+                Change
+              </button>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             {PHASE_ORDER.map(phase => {
@@ -470,15 +542,15 @@ export default function ChecklistPage() {
         />
       </div>
 
-      {obsModal.open && currentUser && stockTake && (
+      {obsModal.open && userName && stockTake && (
         <ObservationModal
           observation={obsModal.observation}
           checklistItem={obsModal.checklistItem}
           stockTakeId={stockTake.id}
           phase={activePhase}
           department={obsModal.department}
-          userName={currentUser.name}
-          userId={currentUser.id}
+          userName={userName}
+          userId={'checklist-' + userName}
           onSave={handleSaveObservation}
           onClose={() => setObsModal({ open: false, department: 'Finance' })}
         />

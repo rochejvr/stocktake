@@ -203,6 +203,8 @@ export interface CountResult {
   count2_qty: number | null;
   count2_direct_qty: number | null;
   count2_wip_qty: number | null;
+  count1_external_qty: number | null;
+  count2_external_qty: number | null;
   accepted_qty: number | null;    // which count qty was accepted
   variance_qty: number | null;    // accepted_qty - pastel_qty
   variance_pct: number | null;    // variance_qty / pastel_qty * 100

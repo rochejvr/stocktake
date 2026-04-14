@@ -57,22 +57,28 @@ export async function POST(
     }
   }
 
-  // Aggregate scan records by barcode+store, split direct vs WIP
+  // Aggregate scan records by barcode+store, split direct vs WIP vs external
   // Key format: "barcode|store_code"
   const scanDirect: Record<string, number> = {};
   const scanWip: Record<string, number> = {};
+  const scanExternal: Record<string, number> = {};
   const scanTotals: Record<string, number> = {};
   if (sessionIds.length > 0) {
     const { data: records } = await supabase
       .from('scan_records')
-      .select('barcode, quantity, store_code, chained_from')
+      .select('barcode, quantity, store_code, chained_from, source')
       .in('session_id', sessionIds);
 
     for (const r of (records || [])) {
       const store = r.store_code || '001';
       const qty = r.quantity;
 
-      if (r.chained_from) {
+      if (r.source === 'external') {
+        // External supplier stock → External column + totals
+        const key = `${r.barcode}|${store}`;
+        scanExternal[key] = (scanExternal[key] || 0) + qty;
+        scanTotals[key] = (scanTotals[key] || 0) + qty;
+      } else if (r.chained_from) {
         // Chain credits → WIP column for the scanned barcode
         const key = `${r.barcode}|${store}`;
         scanWip[key] = (scanWip[key] || 0) + qty;
@@ -164,6 +170,7 @@ export async function POST(
 
     const directCol = isRecount ? 'count2_direct_qty' : 'count1_direct_qty';
     const wipCol = isRecount ? 'count2_wip_qty' : 'count1_wip_qty';
+    const externalCol = isRecount ? 'count2_external_qty' : 'count1_external_qty';
 
     const row: Record<string, unknown> = {
       stock_take_id: id,
@@ -176,6 +183,7 @@ export async function POST(
       [countCol]: counted,
       [directCol]: scanDirect[key] ?? null,
       [wipCol]: scanWip[key] ?? null,
+      [externalCol]: scanExternal[key] ?? null,
       variance_qty: varianceQty,
       variance_pct: variancePct,
     };
@@ -192,6 +200,7 @@ export async function POST(
       const [barcode, scanStore] = compositeKey.split('|');
       const directCol = isRecount ? 'count2_direct_qty' : 'count1_direct_qty';
       const wipCol = isRecount ? 'count2_wip_qty' : 'count1_wip_qty';
+      const externalCol = isRecount ? 'count2_external_qty' : 'count1_external_qty';
       const extraRow: Record<string, unknown> = {
         stock_take_id: id,
         part_number: barcode,
@@ -203,6 +212,7 @@ export async function POST(
         [countCol]: qty,
         [directCol]: scanDirect[compositeKey] ?? null,
         [wipCol]: scanWip[compositeKey] ?? null,
+        [externalCol]: scanExternal[compositeKey] ?? null,
         variance_qty: qty,
         variance_pct: 100,
       };

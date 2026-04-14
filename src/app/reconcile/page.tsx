@@ -783,6 +783,7 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
   const activeQty = useCount2 ? r.count2_qty : r.count1_qty;
   const activeDirect = useCount2 ? r.count2_direct_qty : r.count1_direct_qty;
   const activeWip = useCount2 ? r.count2_wip_qty : r.count1_wip_qty;
+  const activeExternal = useCount2 ? r.count2_external_qty : r.count1_external_qty;
 
   // Compute variance from active count
   const varQty = activeQty !== null ? activeQty - r.pastel_qty : null;
@@ -863,9 +864,10 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
             <span className="text-[var(--muted-light)]">—</span>
           ) : <span className="text-[var(--muted-light)]">—</span>}
         </td>
-        {/* Count: WIP sub-column (BOM + chain credits) */}
+        {/* Count: WIP sub-column (BOM + chain credits + external) */}
         <td className="px-2 py-2 text-xs text-right font-mono text-[var(--muted)]">
           {activeWip ? activeWip : ''}
+          {activeExternal ? <span className="text-amber-600 ml-1" title="External supplier stock">+{activeExternal}e</span> : ''}
         </td>
         {/* Variance */}
         <td className="px-3 py-2 text-xs text-right font-mono font-bold" style={{ color: varianceColor }}>
@@ -956,12 +958,12 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
                     <div>
                       <span className="text-[10px] text-[var(--muted)]">Count 1:</span>{' '}
                       <span className="font-mono font-bold">{r.count1_qty ?? '—'}</span>
-                      {r.count1_wip_qty ? <span className="text-[10px] text-[var(--muted)]"> ({r.count1_direct_qty} part + {r.count1_wip_qty} wip)</span> : null}
+                      {(r.count1_wip_qty || r.count1_external_qty) ? <span className="text-[10px] text-[var(--muted)]"> ({r.count1_direct_qty ?? 0} part{r.count1_wip_qty ? ` + ${r.count1_wip_qty} wip` : ''}{r.count1_external_qty ? ` + ${r.count1_external_qty} ext` : ''})</span> : null}
                     </div>
                     <div>
                       <span className="text-[10px] text-[var(--muted)]">Count 2:</span>{' '}
                       <span className="font-mono font-bold">{r.count2_qty ?? '—'}</span>
-                      {r.count2_wip_qty ? <span className="text-[10px] text-[var(--muted)]"> ({r.count2_direct_qty} part + {r.count2_wip_qty} wip)</span> : null}
+                      {(r.count2_wip_qty || r.count2_external_qty) ? <span className="text-[10px] text-[var(--muted)]"> ({r.count2_direct_qty ?? 0} part{r.count2_wip_qty ? ` + ${r.count2_wip_qty} wip` : ''}{r.count2_external_qty ? ` + ${r.count2_external_qty} ext` : ''})</span> : null}
                     </div>
                   </div>
                 </div>

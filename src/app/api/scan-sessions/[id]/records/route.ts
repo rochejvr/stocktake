@@ -38,6 +38,7 @@ export async function POST(
     user_name: string;
     store_code?: string;
     chained_from?: string | null;
+    source?: string;
   }> = Array.isArray(body) ? body : [body];
 
   const toInsert = records.map(r => ({
@@ -49,6 +50,7 @@ export async function POST(
     user_name: r.user_name,
     store_code: r.store_code || '001',
     chained_from: r.chained_from || null,
+    source: r.source || 'physical',
   }));
 
   const { data, error } = await supabase
