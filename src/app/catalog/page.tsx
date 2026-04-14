@@ -65,7 +65,8 @@ export default function CatalogPage() {
           <div className="relative flex-1 max-w-md">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted-light)]" />
             <input
-              className="input pl-8"
+              className="input"
+              style={{ paddingLeft: '2rem' }}
               placeholder="Search part number or description..."
               value={search}
               onChange={e => setSearch(e.target.value)}

@@ -51,7 +51,8 @@ export function WipMasterList({
         <div className="relative">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--muted-light)]" />
           <input
-            className="input pl-8 text-xs"
+            className="input text-xs"
+            style={{ paddingLeft: '2rem' }}
             placeholder="Search WIP or component..."
             value={search}
             onChange={e => onSearchChange(e.target.value)}
