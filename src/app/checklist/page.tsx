@@ -503,6 +503,33 @@ export default function ChecklistPage() {
                     );
                   })}
 
+                  {/* Department-level observations (not attached to a specific item) */}
+                  {(() => {
+                    const deptObs = observations.filter(
+                      o => o.phase === activePhase && o.department === dept && !o.checklist_item_id
+                    );
+                    if (deptObs.length === 0) return null;
+                    return (
+                      <div className="px-4 py-2.5 space-y-2 border-b" style={{ background: '#fefce8', borderColor: 'var(--card-border-light)' }}>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--warning)' }}>
+                          Department Observations
+                        </div>
+                        {deptObs.map(obs => (
+                          <ObservationCard
+                            key={obs.id}
+                            observation={obs}
+                            onEdit={() => setObsModal({
+                              open: true,
+                              observation: obs,
+                              department: obs.department as Department,
+                            })}
+                            onDelete={() => handleDeleteObservation(obs.id)}
+                          />
+                        ))}
+                      </div>
+                    );
+                  })()}
+
                   {/* Sign-off bar */}
                   <div className="px-4 py-3 flex items-center justify-between" style={{ background: '#f8fafc' }}>
                     <div>
