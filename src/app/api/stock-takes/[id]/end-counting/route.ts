@@ -44,16 +44,62 @@ export async function POST(
   const { data: sessions } = await sessionQuery;
   const sessionIds = (sessions || []).map(s => s.id);
 
-  // Load BOM mappings for WIP explosion (WIP → component parts)
-  const { data: bomMappings } = await supabase
-    .from('bom_mappings')
-    .select('wip_code, component_code, qty_per_wip');
+  // Load ALL BOM mappings for WIP explosion (WIP → component parts)
+  // Must paginate — Supabase defaults to 1000 row limit
+  let bomMappings: Array<{ wip_code: string; component_code: string; qty_per_wip: number }> = [];
+  let bomOffset = 0;
+  const BOM_PAGE = 1000;
+  while (true) {
+    const { data: page } = await supabase
+      .from('bom_mappings')
+      .select('wip_code, component_code, qty_per_wip')
+      .range(bomOffset, bomOffset + BOM_PAGE - 1);
+    if (!page || page.length === 0) break;
+    bomMappings = bomMappings.concat(page);
+    if (page.length < BOM_PAGE) break;
+    bomOffset += BOM_PAGE;
+  }
 
   const bomLookup: Record<string, Array<{ component_code: string; qty_per_wip: number }>> = {};
   if (bomMappings) {
     for (const bom of bomMappings) {
       if (!bomLookup[bom.wip_code]) bomLookup[bom.wip_code] = [];
-      bomLookup[bom.wip_code].push({ component_code: bom.component_code, qty_per_wip: bom.qty_per_wip });
+      bomLookup[bom.wip_code].push({ component_code: bom.component_code, qty_per_wip: bom.qty_per_wip || 1 });
+    }
+  }
+
+  // Helper: aggregate scan records into direct/wip/external/totals maps
+  function aggregateRecords(
+    records: Array<{ barcode: string; quantity: number; store_code: string; chained_from: string | null; source: string }>,
+    direct: Record<string, number>,
+    wip: Record<string, number>,
+    external: Record<string, number>,
+    totals: Record<string, number>,
+  ) {
+    for (const r of records) {
+      const store = r.store_code || '001';
+      const qty = r.quantity;
+
+      if (r.source === 'external') {
+        const key = `${r.barcode}|${store}`;
+        external[key] = (external[key] || 0) + qty;
+        totals[key] = (totals[key] || 0) + qty;
+      } else if (r.chained_from) {
+        const key = `${r.barcode}|${store}`;
+        wip[key] = (wip[key] || 0) + qty;
+        totals[key] = (totals[key] || 0) + qty;
+      } else if (bomLookup[r.barcode]) {
+        for (const comp of bomLookup[r.barcode]) {
+          const compKey = `${comp.component_code}|${store}`;
+          const compQty = qty * comp.qty_per_wip;
+          wip[compKey] = (wip[compKey] || 0) + compQty;
+          totals[compKey] = (totals[compKey] || 0) + compQty;
+        }
+      } else {
+        const key = `${r.barcode}|${store}`;
+        direct[key] = (direct[key] || 0) + qty;
+        totals[key] = (totals[key] || 0) + qty;
+      }
     }
   }
 
@@ -68,45 +114,49 @@ export async function POST(
       .from('scan_records')
       .select('barcode, quantity, store_code, chained_from, source')
       .in('session_id', sessionIds);
+    aggregateRecords(records || [], scanDirect, scanWip, scanExternal, scanTotals);
+  }
 
-    for (const r of (records || [])) {
-      const store = r.store_code || '001';
-      const qty = r.quantity;
-
-      if (r.source === 'external') {
-        // External supplier stock → External column + totals
-        const key = `${r.barcode}|${store}`;
-        scanExternal[key] = (scanExternal[key] || 0) + qty;
-        scanTotals[key] = (scanTotals[key] || 0) + qty;
-      } else if (r.chained_from) {
-        // Chain credits → WIP column for the scanned barcode
-        const key = `${r.barcode}|${store}`;
-        scanWip[key] = (scanWip[key] || 0) + qty;
-        scanTotals[key] = (scanTotals[key] || 0) + qty;
-      } else if (bomLookup[r.barcode]) {
-        // WIP scan → explode into component parts via BOM mapping
-        for (const comp of bomLookup[r.barcode]) {
-          const compKey = `${comp.component_code}|${store}`;
-          const compQty = qty * comp.qty_per_wip;
-          scanWip[compKey] = (scanWip[compKey] || 0) + compQty;
-          scanTotals[compKey] = (scanTotals[compKey] || 0) + compQty;
-        }
-      } else {
-        // Direct part scan → Part column
-        const key = `${r.barcode}|${store}`;
-        scanDirect[key] = (scanDirect[key] || 0) + qty;
-        scanTotals[key] = (scanTotals[key] || 0) + qty;
-      }
+  // For recounts: also re-aggregate count1 from count_number=1 sessions
+  // This ensures any scans added to count1 sessions after the first end-counting are captured
+  const c1Direct: Record<string, number> = {};
+  const c1Wip: Record<string, number> = {};
+  const c1External: Record<string, number> = {};
+  const c1Totals: Record<string, number> = {};
+  if (isRecount) {
+    const { data: c1Sessions } = await supabase
+      .from('scan_sessions')
+      .select('id')
+      .eq('stock_take_id', id)
+      .eq('count_number', 1);
+    const c1SessionIds = (c1Sessions || []).map(s => s.id);
+    if (c1SessionIds.length > 0) {
+      const { data: c1Records } = await supabase
+        .from('scan_records')
+        .select('barcode, quantity, store_code, chained_from, source')
+        .in('session_id', c1SessionIds);
+      aggregateRecords(c1Records || [], c1Direct, c1Wip, c1External, c1Totals);
     }
   }
 
-  // 3. Get all Pastel inventory for this stock take
-  const { data: inventory } = await supabase
-    .from('pastel_inventory')
-    .select('*')
-    .eq('stock_take_id', id);
+  // 3. Get all Pastel inventory for this stock take (paginate past 1000 row limit)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let inventory: Array<any> = [];
+  let invOffset = 0;
+  const INV_PAGE = 1000;
+  while (true) {
+    const { data: page } = await supabase
+      .from('pastel_inventory')
+      .select('*')
+      .eq('stock_take_id', id)
+      .range(invOffset, invOffset + INV_PAGE - 1);
+    if (!page || page.length === 0) break;
+    inventory = inventory.concat(page);
+    if (page.length < INV_PAGE) break;
+    invOffset += INV_PAGE;
+  }
 
-  if (!inventory || inventory.length === 0) {
+  if (inventory.length === 0) {
     return NextResponse.json({ error: 'No inventory data found' }, { status: 400 });
   }
 
@@ -122,8 +172,28 @@ export async function POST(
     const pastelQty = inv.pastel_qty;
     const tier = (inv.tier || 'C') as 'A' | 'B' | 'C';
 
-    // For recount: skip items that weren't rescanned — preserve their existing Count 2 data
-    if (isRecount && counted === null) continue;
+    // For recount: items not rescanned in count2 still need count1 refreshed
+    if (isRecount && counted === null) {
+      // Only update count1 columns (don't touch count2)
+      const c1Total = c1Totals[key] ?? null;
+      if (c1Total !== null) {
+        upserts.push({
+          stock_take_id: id,
+          part_number: inv.part_number,
+          description: inv.description,
+          store_code: inv.store_code,
+          tier,
+          unit_cost: inv.unit_cost,
+          pastel_qty: pastelQty,
+          count1_qty: c1Total,
+          count1_direct_qty: c1Direct[key] ?? null,
+          count1_wip_qty: c1Wip[key] ?? null,
+          count1_external_qty: c1External[key] ?? null,
+        });
+        matchedKeys.add(key);
+      }
+      continue;
+    }
 
     // Calculate variance (only if counted)
     let varianceQty: number | null = null;
@@ -190,6 +260,15 @@ export async function POST(
     if (!isRecount) {
       row.recount_flagged = recountFlagged;
       row.recount_reasons = recountReasons;
+    }
+    // During recount: also refresh count1 data from count_number=1 sessions
+    // This captures any scans added to count1 sessions after the first end-counting
+    if (isRecount) {
+      const c1Total = c1Totals[key] ?? null;
+      row.count1_qty = c1Total;
+      row.count1_direct_qty = c1Direct[key] ?? null;
+      row.count1_wip_qty = c1Wip[key] ?? null;
+      row.count1_external_qty = c1External[key] ?? null;
     }
     upserts.push(row);
   }

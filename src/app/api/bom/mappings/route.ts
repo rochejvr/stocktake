@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { supabase, fetchAll } from '@/lib/supabase';
 
 export async function GET() {
   if (!supabase) return NextResponse.json([]);
-  const { data } = await supabase
-    .from('bom_mappings')
-    .select('*')
-    .order('wip_code')
-    .order('component_code');
-  return NextResponse.json(data || []);
+  try {
+    const data = await fetchAll(
+      supabase.from('bom_mappings').select('*').order('wip_code').order('component_code')
+    );
+    return NextResponse.json(data);
+  } catch (error) {
+    return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
 }
 
 export async function POST(request: NextRequest) {

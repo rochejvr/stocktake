@@ -20,7 +20,7 @@ interface ParseResult {
 
 export default function SetupPage() {
   const [year, setYear]       = useState(new Date().getFullYear());
-  const [quarter, setQuarter] = useState(Math.ceil((new Date().getMonth() + 1) / 3));
+  const [month, setMonth]     = useState(new Date().getMonth() + 1);
   const [countTime, setCountTime]     = useState('12:00');
   const [recountTime, setRecountTime] = useState('15:00');
 
@@ -34,7 +34,7 @@ export default function SetupPage() {
   const [parseError, setParseError] = useState<string | null>(null);
   const [alreadyExists, setAlreadyExists] = useState(false);
 
-  const ref = buildReference(year, quarter);
+  const ref = buildReference(year, month);
 
   // Check if reference already exists when year/quarter changes
   useEffect(() => {
@@ -97,7 +97,7 @@ export default function SetupPage() {
         body: JSON.stringify({
           reference: ref,
           name: `${ref} Stock Take`,
-          quarter,
+          month,
           year,
           counting_deadline: countingDeadline.toISOString(),
           recount_deadline:  recountDeadline.toISOString(),
@@ -142,9 +142,11 @@ export default function SetupPage() {
               </select>
             </div>
             <div>
-              <label className="text-xs font-medium text-[var(--muted)] block mb-1.5">Quarter</label>
-              <select className="input" value={quarter} onChange={e => setQuarter(+e.target.value)}>
-                {[1,2,3,4].map(q => <option key={q} value={q}>Q{q}</option>)}
+              <label className="text-xs font-medium text-[var(--muted)] block mb-1.5">Month</label>
+              <select className="input" value={month} onChange={e => setMonth(+e.target.value)}>
+                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                  <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
+                ))}
               </select>
             </div>
           </div>

@@ -25,17 +25,27 @@ export async function GET(
     return NextResponse.json({ error: `Stock take is in '${st.status}' status — must be reviewing or complete` }, { status: 400 });
   }
 
-  // Get all accepted count results
-  const { data: results, error: crErr } = await supabase
-    .from('count_results')
-    .select('*')
-    .eq('stock_take_id', id)
-    .eq('deviation_accepted', true)
-    .order('part_number')
-    .order('store_code');
-
-  if (crErr) return NextResponse.json({ error: crErr.message }, { status: 500 });
-  if (!results || results.length === 0) {
+  // Get all accepted count results (paginate past 1000 row limit)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let results: Array<any> = [];
+  let crOffset = 0;
+  const CR_PAGE = 1000;
+  while (true) {
+    const { data: page, error: crErr } = await supabase
+      .from('count_results')
+      .select('*')
+      .eq('stock_take_id', id)
+      .eq('deviation_accepted', true)
+      .order('part_number')
+      .order('store_code')
+      .range(crOffset, crOffset + CR_PAGE - 1);
+    if (crErr) return NextResponse.json({ error: crErr.message }, { status: 500 });
+    if (!page || page.length === 0) break;
+    results = results.concat(page);
+    if (page.length < CR_PAGE) break;
+    crOffset += CR_PAGE;
+  }
+  if (results.length === 0) {
     return NextResponse.json({ error: 'No accepted results to export' }, { status: 400 });
   }
 

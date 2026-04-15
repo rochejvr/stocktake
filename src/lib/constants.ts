@@ -26,9 +26,9 @@ export function assignTier(unitCost: number | null): 'A' | 'B' | 'C' {
 // Round number detection — variances that are exact multiples of these
 export const ROUND_NUMBER_MULTIPLES = [50, 100, 200, 500, 1000];
 
-// Stock take reference format: ST-YYYY-QN
-export function buildReference(year: number, quarter: number): string {
-  return `ST-${year}-Q${quarter}`;
+// Stock take reference format: ST-YYYYMM
+export function buildReference(year: number, month: number): string {
+  return `ST-${year}${String(month).padStart(2, '0')}`;
 }
 
 // Counting deadline: 12:00 on count day

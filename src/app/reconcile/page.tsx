@@ -182,6 +182,25 @@ export default function ReconcilePage() {
   const acceptedParts = results.filter(r => r.deviation_accepted === true).length;
   const anyHasCount2 = results.some(r => r.count2_qty !== null);
 
+  // Overall deviation: sum(abs(variance)) / sum(counted qty) across all counted items
+  const deviationStats = useMemo(() => {
+    let totalCounted = 0;
+    let totalAbsVariance = 0;
+    let totalValueVariance = 0;
+    let countedParts = 0;
+    for (const r of results) {
+      const counted = r.count2_qty ?? r.count1_qty;
+      if (counted === null) continue;
+      countedParts++;
+      totalCounted += counted;
+      const variance = counted - r.pastel_qty;
+      totalAbsVariance += Math.abs(variance);
+      if (r.unit_cost) totalValueVariance += Math.abs(variance) * Number(r.unit_cost);
+    }
+    const overallPct = totalCounted > 0 ? (totalAbsVariance / totalCounted) * 100 : 0;
+    return { totalCounted, totalAbsVariance, totalValueVariance, overallPct, countedParts };
+  }, [results]);
+
   // Accept deviation — uses the active count qty
   const handleAcceptDeviation = async (id: string, acceptedQty: number) => {
     setAccepting(id);
@@ -578,12 +597,67 @@ export default function ReconcilePage() {
             )}
 
             {/* Summary stats */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-              <StatPill label="Total Parts" value={totalParts} />
-              <StatPill label="Flagged" value={flaggedParts} color="amber" />
-              <StatPill label="Uncounted" value={uncountedParts} color="red" />
-              <StatPill label="Accepted" value={acceptedParts} color="green" />
-              <StatPill label="Remaining" value={totalParts - acceptedParts - uncountedParts} />
+            <div className="card p-0 overflow-hidden">
+              <div className="flex flex-col md:flex-row">
+                {/* Hero: Overall deviation */}
+                <div className="flex-shrink-0 px-6 py-5 flex items-center gap-5 border-b md:border-b-0 md:border-r" style={{ borderColor: 'var(--card-border)' }}>
+                  <div className="relative w-20 h-20">
+                    <svg viewBox="0 0 36 36" className="w-20 h-20 -rotate-90">
+                      <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--card-border)" strokeWidth="2.5" />
+                      <circle
+                        cx="18" cy="18" r="15.9" fill="none"
+                        stroke={deviationStats.overallPct <= 3 ? '#22c55e' : deviationStats.overallPct <= 10 ? 'var(--warning)' : 'var(--error)'}
+                        strokeWidth="2.5"
+                        strokeDasharray={`${Math.min(100, 100 - deviationStats.overallPct)} 100`}
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <span className="text-lg font-bold" style={{
+                        fontFamily: 'var(--font-display)',
+                        color: deviationStats.overallPct <= 3 ? '#22c55e' : deviationStats.overallPct <= 10 ? 'var(--warning)' : 'var(--error)',
+                      }}>
+                        {deviationStats.overallPct.toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>Overall Deviation</div>
+                    <div className="text-[11px] text-[var(--muted)] mt-0.5">
+                      {deviationStats.totalAbsVariance.toLocaleString()} variance / {deviationStats.totalCounted.toLocaleString()} counted
+                    </div>
+                    <div className="text-[11px] text-[var(--muted)]">
+                      {deviationStats.countedParts.toLocaleString()} of {totalParts.toLocaleString()} parts counted
+                    </div>
+                    {deviationStats.totalValueVariance > 0 && (
+                      <div className="text-[11px] text-[var(--muted)]">
+                        R{deviationStats.totalValueVariance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} value variance
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {/* Secondary stats */}
+                <div className="flex-1 grid grid-cols-2 lg:grid-cols-4 divide-x" style={{ '--tw-divide-opacity': '1', borderColor: 'var(--card-border)' } as React.CSSProperties}>
+                  <div className="px-4 py-4 flex flex-col items-center justify-center">
+                    <div className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider">Total Parts</div>
+                    <div className="text-2xl font-bold mt-1" style={{ fontFamily: 'var(--font-display)' }}>{totalParts}</div>
+                  </div>
+                  <div className="px-4 py-4 flex flex-col items-center justify-center">
+                    <div className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider">Flagged</div>
+                    <div className="text-2xl font-bold mt-1" style={{ fontFamily: 'var(--font-display)', color: flaggedParts > 0 ? 'var(--warning)' : 'var(--foreground)' }}>{flaggedParts}</div>
+                  </div>
+                  <div className="px-4 py-4 flex flex-col items-center justify-center">
+                    <div className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider">Accepted</div>
+                    <div className="text-2xl font-bold mt-1" style={{ fontFamily: 'var(--font-display)', color: acceptedParts > 0 ? '#22c55e' : 'var(--foreground)' }}>{acceptedParts}</div>
+                  </div>
+                  <div className="px-4 py-4 flex flex-col items-center justify-center">
+                    <div className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider">Remaining</div>
+                    <div className="text-2xl font-bold mt-1" style={{ fontFamily: 'var(--font-display)', color: (totalParts - acceptedParts - uncountedParts) > 0 ? 'var(--foreground)' : '#22c55e' }}>
+                      {totalParts - acceptedParts - uncountedParts}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Filters + Search */}
@@ -1022,39 +1096,37 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
               {breakdown && (breakdown.count1.length > 0 || breakdown.count2.length > 0) && (
                 <div className="col-span-2 md:col-span-4">
                   <div className="text-[10px] font-semibold text-[var(--muted)] uppercase mb-1">Counter Breakdown</div>
-                  <div className="flex flex-col sm:flex-row gap-4">
-                    {breakdown.count1.length > 0 && (
-                      <div>
-                        <div className="text-[10px] text-[var(--muted)] mb-0.5">Count 1</div>
-                        {breakdown.count1.map((c, i) => (
-                          <div key={i} className="text-[11px] flex items-center gap-2">
-                            <span className="font-medium w-20 truncate">{c.counter}</span>
-                            <span className="font-mono font-bold">{c.total}</span>
-                            {(c.wip > 0 || c.ext > 0) && (
-                              <span className="text-[10px] text-[var(--muted)]">
-                                ({c.direct} part{c.wip ? ` + ${c.wip} wip` : ''}{c.ext ? ` + ${c.ext} ext` : ''})
-                              </span>
-                            )}
-                          </div>
-                        ))}
+                  <div className="flex flex-col sm:flex-row gap-6">
+                    {[
+                      { label: 'Count 1', entries: breakdown.count1 },
+                      { label: 'Count 2', entries: breakdown.count2 },
+                    ].filter(g => g.entries.length > 0).map(group => (
+                      <div key={group.label}>
+                        <div className="text-[10px] text-[var(--muted)] mb-1">{group.label}</div>
+                        <table className="text-[11px]">
+                          <thead>
+                            <tr>
+                              <th className="text-left pr-3 text-[9px] font-semibold text-[var(--muted)] uppercase pb-0.5"></th>
+                              <th className="text-right px-2 text-[9px] font-semibold text-[var(--muted)] uppercase pb-0.5">Part</th>
+                              <th className="text-right px-2 text-[9px] font-semibold text-[var(--muted)] uppercase pb-0.5">WIP</th>
+                              <th className="text-right px-2 text-[9px] font-semibold text-amber-600 uppercase pb-0.5">Ext</th>
+                              <th className="text-right pl-3 text-[9px] font-semibold text-[var(--muted)] uppercase pb-0.5">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.entries.map((c, i) => (
+                              <tr key={i}>
+                                <td className="pr-3 font-medium">{c.counter}</td>
+                                <td className="text-right px-2 font-mono">{c.direct || '—'}</td>
+                                <td className="text-right px-2 font-mono text-[var(--muted)]">{c.wip || '—'}</td>
+                                <td className="text-right px-2 font-mono text-amber-600">{c.ext || '—'}</td>
+                                <td className="text-right pl-3 font-mono font-bold">{c.total}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
-                    )}
-                    {breakdown.count2.length > 0 && (
-                      <div>
-                        <div className="text-[10px] text-[var(--muted)] mb-0.5">Count 2</div>
-                        {breakdown.count2.map((c, i) => (
-                          <div key={i} className="text-[11px] flex items-center gap-2">
-                            <span className="font-medium w-20 truncate">{c.counter}</span>
-                            <span className="font-mono font-bold">{c.total}</span>
-                            {(c.wip > 0 || c.ext > 0) && (
-                              <span className="text-[10px] text-[var(--muted)]">
-                                ({c.direct} part{c.wip ? ` + ${c.wip} wip` : ''}{c.ext ? ` + ${c.ext} ext` : ''})
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    ))}
                   </div>
                 </div>
               )}

@@ -6,7 +6,7 @@ export async function POST(request: NextRequest) {
   if (!supabase) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 });
 
   const body = await request.json();
-  const { reference, name, quarter, year, counting_deadline, recount_deadline, inventory } = body;
+  const { reference, name, month, quarter, year, counting_deadline, recount_deadline, inventory } = body;
 
   // Check if this reference already exists
   const { data: existing } = await supabase
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     // Create new stock take
     const { data: created, error: stErr } = await supabase
       .from('stock_takes')
-      .insert({ reference, name, quarter, year, counting_deadline, recount_deadline, created_by: 'admin', status: 'setup' })
+      .insert({ reference, name, quarter: month || quarter, year, counting_deadline, recount_deadline, created_by: 'admin', status: 'setup' })
       .select()
       .single();
     if (stErr) return NextResponse.json({ error: stErr.message }, { status: 400 });

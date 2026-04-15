@@ -2,8 +2,9 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import {
-  ScanLine, Users, Package, RefreshCw, Clock, CheckCircle, UserPlus, Trash2, Eye, EyeOff, StopCircle,
+  ScanLine, Users, Package, RefreshCw, Clock, CheckCircle, UserPlus, Trash2, Eye, EyeOff, StopCircle, Building2, ChevronDown, ChevronRight,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ScanQRCard } from '@/components/shared/ScanQRCard';
 import type { StockTake, StockTakeStats, Counter } from '@/types';
@@ -216,6 +217,21 @@ export default function CountPage() {
             {/* Scanner QR code */}
             <ScanQRCard compact />
 
+            {/* Import external suppliers */}
+            <Link
+              href="/scan"
+              className="card px-4 py-3 flex items-center gap-3 hover:bg-slate-50 transition-colors cursor-pointer"
+              style={{ borderColor: '#fde68a' }}
+            >
+              <div className="p-2 rounded-full bg-amber-50">
+                <Building2 size={18} className="text-amber-600" />
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-semibold" style={{ fontFamily: 'var(--font-display)' }}>Import External Suppliers</div>
+                <div className="text-[11px] text-[var(--muted)]">Excel file with columns: Item Number, Description, Vendor ID, Stock Update, Notes</div>
+              </div>
+            </Link>
+
             {/* Active sessions */}
             <div>
               <h2 className="section-title mb-3 flex items-center gap-2">
@@ -365,32 +381,99 @@ function MiniStat({ icon, label, value, color }: {
 
 function SessionCard({ session }: { session: SessionRow }) {
   const isActive = !session.submitted_at;
+  const [expanded, setExpanded] = useState(false);
+  const [records, setRecords] = useState<Array<{ id: string; barcode: string; quantity: number; source?: string; store_code?: string; chained_from?: string | null }> | null>(null);
+  const [loadingRecords, setLoadingRecords] = useState(false);
+
+  const handleToggle = async () => {
+    if (isActive) return; // Only submitted sessions are expandable
+    if (!expanded && !records) {
+      setLoadingRecords(true);
+      try {
+        const res = await fetch(`/api/scan-sessions/${session.id}/records`);
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          // Sort alphabetically by barcode, exclude chained items
+          const sorted = data
+            .filter((r: { chained_from?: string | null }) => !r.chained_from)
+            .sort((a: { barcode: string }, b: { barcode: string }) => a.barcode.localeCompare(b.barcode));
+          setRecords(sorted);
+        }
+      } catch { /* ignore */ }
+      finally { setLoadingRecords(false); }
+    }
+    setExpanded(prev => !prev);
+  };
+
   return (
-    <div className="card px-4 py-3 flex items-center gap-4">
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${
-        isActive ? 'bg-green-500' : 'bg-slate-400'
-      }`}>
-        {session.user_name.charAt(0).toUpperCase()}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold">{session.user_name}</div>
-        <div className="text-[11px] text-[var(--muted)]">
-          Count {session.count_number}
-          {session.zone ? ` · ${session.zone}` : ''}
-          {' · '}
-          {formatDistanceToNow(new Date(session.started_at), { addSuffix: true })}
+    <div className="card overflow-hidden">
+      <div
+        className={`px-4 py-3 flex items-center gap-4 ${!isActive ? 'cursor-pointer hover:bg-slate-50 transition-colors' : ''}`}
+        onClick={handleToggle}
+      >
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${
+          isActive ? 'bg-green-500' : 'bg-slate-400'
+        }`}>
+          {session.user_name.charAt(0).toUpperCase()}
         </div>
-      </div>
-      <div className="text-right flex-shrink-0">
-        <div className="text-base font-bold" style={{ fontFamily: 'var(--font-display)' }}>
-          {session.record_count}
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold">{session.user_name}</div>
+          <div className="text-[11px] text-[var(--muted)]">
+            Count {session.count_number}
+            {session.zone ? ` · ${session.zone}` : ''}
+            {' · '}
+            {formatDistanceToNow(new Date(session.started_at), { addSuffix: true })}
+          </div>
         </div>
-        <div className="text-[10px] text-[var(--muted)]">scans</div>
+        <div className="text-right flex-shrink-0">
+          <div className="text-base font-bold" style={{ fontFamily: 'var(--font-display)' }}>
+            {session.record_count}
+          </div>
+          <div className="text-[10px] text-[var(--muted)]">scans</div>
+        </div>
+        {isActive ? (
+          <Clock size={14} className="text-green-500 flex-shrink-0" />
+        ) : expanded ? (
+          <ChevronDown size={14} className="text-slate-400 flex-shrink-0" />
+        ) : (
+          <ChevronRight size={14} className="text-slate-400 flex-shrink-0" />
+        )}
       </div>
-      {isActive ? (
-        <Clock size={14} className="text-green-500 flex-shrink-0" />
-      ) : (
-        <CheckCircle size={14} className="text-slate-400 flex-shrink-0" />
+      {expanded && !isActive && (
+        <div className="border-t px-4 py-2 max-h-[300px] overflow-y-auto" style={{ borderColor: 'var(--card-border)' }}>
+          {loadingRecords ? (
+            <div className="text-[11px] text-[var(--muted)] py-2">Loading scans...</div>
+          ) : records && records.length > 0 ? (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b" style={{ borderColor: 'var(--card-border)' }}>
+                  <th className="text-left py-1.5 text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wider">Part Number</th>
+                  <th className="text-right py-1.5 text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wider">Qty</th>
+                  <th className="text-center py-1.5 text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wider w-12">Loc</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.map(r => (
+                  <tr key={r.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--card-border)' }}>
+                    <td className="py-1.5 font-mono font-medium">{r.barcode}</td>
+                    <td className="py-1.5 text-right font-mono">{r.quantity}</td>
+                    <td className="py-1.5 text-center">
+                      {r.source === 'external' ? (
+                        <span className="text-[9px] font-bold px-1.5 py-px rounded bg-amber-100 text-amber-700">External</span>
+                      ) : r.store_code === '002' ? (
+                        <span className="text-[9px] font-bold px-1.5 py-px rounded bg-amber-100 text-amber-700">Quarantine</span>
+                      ) : (
+                        <span className="text-[9px] font-bold px-1.5 py-px rounded bg-blue-50 text-blue-600">Main</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="text-[11px] text-[var(--muted)] py-2">No scan records</div>
+          )}
+        </div>
       )}
     </div>
   );

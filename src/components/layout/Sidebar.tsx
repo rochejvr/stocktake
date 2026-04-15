@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   ClipboardList, Package, GitBranch, ScanLine,
-  BarChart3, FileDown, Settings, ChevronRight, Database,
+  BarChart3, FileDown, Settings, ChevronRight, Database, X,
 } from 'lucide-react';
 
 const NAV = [
@@ -27,6 +27,7 @@ export function Sidebar() {
   const [expanded, setExpanded] = useState(false);
   const [stockTakeRef, setStockTakeRef] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [showChangelog, setShowChangelog] = useState(false);
 
   // Fetch active stock take directly — consistent across all pages
   useEffect(() => {
@@ -128,13 +129,61 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="px-3 py-3 border-t border-white/10">
-        <div
-          className="text-white/20 text-[10px] overflow-hidden whitespace-nowrap"
+        <button
+          onClick={() => setShowChangelog(true)}
+          className="text-white/20 text-[10px] overflow-hidden whitespace-nowrap hover:text-white/40 transition-colors cursor-pointer"
           style={{ opacity: expanded ? 1 : 0, transition: 'opacity 150ms' }}
         >
-          v0.2.1 · 2027c
-        </div>
+          v0.3.0 · Apr 2026
+        </button>
       </div>
+
+      {/* Changelog modal */}
+      {showChangelog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowChangelog(false)}>
+          <div className="bg-white rounded-2xl shadow-xl mx-4 max-w-md w-full max-h-[80dvh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--card-border)' }}>
+              <div>
+                <h3 className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>What&apos;s New</h3>
+                <p className="text-[11px] text-[var(--muted)]">v0.3.0 — April 2026</p>
+              </div>
+              <button onClick={() => setShowChangelog(false)} className="text-[var(--muted)] hover:text-[var(--foreground)] p-1">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4 text-xs space-y-4">
+              <ChangelogSection title="Dry Run Improvements" items={[
+                'Submit confirmation dialog — prevents accidental session submission',
+                'Chained parts collapse under parent with "+N chain" badge',
+                'External supplier Excel import with preview and validation',
+                'Recount list now shows WIP codes that were actually scanned',
+                'Per-counter breakdown in reconciliation detail view',
+              ]} />
+              <ChangelogSection title="Reconciliation" items={[
+                'Separate EXT column (Part | WIP | Ext) for clarity',
+                'Overall deviation summary with visual ring indicator',
+                'Value variance (ZAR) shown in summary',
+              ]} />
+              <ChangelogSection title="Count Page" items={[
+                'Import External Suppliers link on count page',
+                'Submitted sessions expandable to show scan details',
+                'Location badges (Main / Quarantine / External) per scan',
+              ]} />
+              <ChangelogSection title="Bug Fixes" items={[
+                'Supabase 1000-row limit — paginated all large queries (BOM, inventory, results)',
+                'WIP explosion qty_per_wip null safety',
+                'Session resume preserves external/chained flags',
+                'Recount list filters to actually-scanned WIPs and chain parents only',
+                'Chain parent recount limited to stores where actually scanned',
+              ]} />
+              <ChangelogSection title="Other" items={[
+                'BOM component delete confirmation dialog',
+                'Stock take period changed from quarterly to monthly',
+              ]} />
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
@@ -154,6 +203,22 @@ function StatusDot({ status }: { status: string }) {
       <span className="text-[10px]" style={{ color: colors[status] || '#94a3b8' }}>
         {labels[status] || status}
       </span>
+    </div>
+  );
+}
+
+function ChangelogSection({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div>
+      <div className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider mb-1.5">{title}</div>
+      <ul className="space-y-1">
+        {items.map((item, i) => (
+          <li key={i} className="flex gap-2 text-[var(--foreground)] leading-relaxed">
+            <span className="text-[var(--primary)] mt-0.5 flex-shrink-0">·</span>
+            {item}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

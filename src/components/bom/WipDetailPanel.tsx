@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Plus, Trash2, Edit2, Check, X, AlertTriangle, GitBranch } from 'lucide-react';
 import { ComponentSearch } from '@/components/shared/ComponentSearch';
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import type { BomMapping } from '@/types';
 
 interface WipDetailPanelProps {
@@ -17,6 +18,7 @@ interface WipDetailPanelProps {
 export function WipDetailPanel({ wipCode, components, onSave, onDelete, onDeleteWip, onAddComponent }: WipDetailPanelProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<BomMapping | null>(null);
   const hasMissing = components.some(c => c.missing_from_inventory);
   const missingN = components.filter(c => c.missing_from_inventory).length;
 
@@ -84,13 +86,23 @@ export function WipDetailPanel({ wipCode, components, onSave, onDelete, onDelete
                   key={m.id}
                   mapping={m}
                   onEdit={() => setEditingId(m.id)}
-                  onDelete={() => onDelete(m.id)}
+                  onDelete={() => setDeleteTarget(m)}
                 />
               )
             ))}
           </tbody>
         </table>
       </div>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Component"
+        message={deleteTarget ? `Remove ${deleteTarget.component_code} from this WIP? This will affect how scans of this WIP are counted.` : ''}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => { if (deleteTarget) onDelete(deleteTarget.id); setDeleteTarget(null); }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

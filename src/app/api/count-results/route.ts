@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { supabase, fetchAll } from '@/lib/supabase';
 
 // GET /api/count-results?stockTakeId=xxx&filter=all|flagged|variance|uncounted
 export async function GET(request: NextRequest) {
@@ -26,8 +26,10 @@ export async function GET(request: NextRequest) {
     query = query.eq('deviation_accepted', true);
   }
 
-  const { data, error } = await query;
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data || []);
+  try {
+    const data = await fetchAll(query);
+    return NextResponse.json(data);
+  } catch (error) {
+    return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
 }
