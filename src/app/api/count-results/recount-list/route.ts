@@ -74,17 +74,37 @@ export async function GET(request: NextRequest) {
     chainParentRows = parentResults || [];
   }
 
-  // 6. Get count_results for all WIP codes
+  // 6. Build WIP list from bom_mappings directly (WIP codes don't have count_results rows —
+  //    they're exploded into components during end-counting)
   const allWipCodes = [...wipCodeSet];
-  let wipResults: Array<{ part_number: string; description: string; store_code: string; pastel_qty: number; count1_qty: number | null; count2_qty: number | null }> = [];
+  let wipDescriptions: Record<string, string> = {};
   if (allWipCodes.length > 0) {
-    const { data } = await supabase
-      .from('count_results')
-      .select('part_number, description, store_code, pastel_qty, count1_qty, count2_qty')
-      .eq('stock_take_id', stockTakeId)
-      .in('part_number', allWipCodes);
-    wipResults = data || [];
+    // Try to get descriptions from component_catalog
+    const { data: catalogEntries } = await supabase
+      .from('component_catalog')
+      .select('item_code, description')
+      .in('item_code', allWipCodes);
+    if (catalogEntries) {
+      for (const e of catalogEntries) {
+        wipDescriptions[e.item_code] = e.description || '';
+      }
+    }
+    // Also check bom_mappings for any description info
+    const { data: bomDescs } = await supabase
+      .from('bom_mappings')
+      .select('wip_code, description')
+      .in('wip_code', allWipCodes);
+    if (bomDescs) {
+      for (const b of bomDescs) {
+        if (b.description && !wipDescriptions[b.wip_code]) {
+          wipDescriptions[b.wip_code] = b.description;
+        }
+      }
+    }
   }
+
+  // Collect store codes from flagged components (WIPs should appear for each store with flagged items)
+  const storeCodesWithFlags = new Set(flagged.map(r => r.store_code));
 
   // Helper: is item zero across all counts?
   const isAllZero = (r: { pastel_qty: number; count1_qty: number | null; count2_qty: number | null }) =>
@@ -98,13 +118,21 @@ export async function GET(request: NextRequest) {
       .map(r => ({ ...r, is_chain_parent: true })),
   ];
 
-  // 8. Build deduplicated WIPs list (exclude zero/zero/zero)
-  // Group by wip_code+store to deduplicate
-  const wipMap = new Map<string, typeof wipResults[0]>();
-  for (const wr of wipResults) {
-    const key = `${wr.part_number}|${wr.store_code}`;
-    if (!wipMap.has(key) && !isAllZero(wr)) {
-      wipMap.set(key, wr);
+  // 8. Build WIPs list: one entry per WIP code × store code
+  const wipMap = new Map<string, { part_number: string; description: string; store_code: string; pastel_qty: number; count1_qty: number | null; count2_qty: number | null }>();
+  for (const wipCode of allWipCodes) {
+    for (const store of storeCodesWithFlags) {
+      const key = `${wipCode}|${store}`;
+      if (!wipMap.has(key)) {
+        wipMap.set(key, {
+          part_number: wipCode,
+          description: wipDescriptions[wipCode] || '',
+          store_code: store,
+          pastel_qty: 0,
+          count1_qty: null,
+          count2_qty: null,
+        });
+      }
     }
   }
   const wips = [...wipMap.values()].sort((a, b) => a.part_number.localeCompare(b.part_number));

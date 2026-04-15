@@ -13,6 +13,9 @@ type FilterType = 'all' | 'flagged' | 'variance' | 'uncounted' | 'accepted';
 type SortField = 'part_number' | 'variance_pct' | 'variance_qty' | 'tier' | 'pastel_qty';
 type SortDir = 'asc' | 'desc';
 
+type CounterEntry = { counter: string; direct: number; wip: number; ext: number; total: number };
+type CounterBreakdown = { count1: CounterEntry[]; count2: CounterEntry[] };
+
 export default function ReconcilePage() {
   const [stockTake, setStockTake] = useState<StockTake | null>(null);
   const [results, setResults] = useState<CountResult[]>([]);
@@ -32,6 +35,9 @@ export default function ReconcilePage() {
   const [loadingRecount, setLoadingRecount] = useState(false);
   // Per-row count selection: which count to show (1 or 2). Only rows with count2 can be toggled.
   const [count2Rows, setCount2Rows] = useState<Set<string>>(new Set());
+  // Per-counter breakdown for expanded rows (fetched on-demand)
+  const [breakdowns, setBreakdowns] = useState<Record<string, CounterBreakdown>>({});
+  const [loadingBreakdown, setLoadingBreakdown] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -96,6 +102,22 @@ export default function ReconcilePage() {
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stockTake?.status, results.length]);
+
+  // Fetch per-counter breakdown when a row is expanded
+  useEffect(() => {
+    if (!expandedId || breakdowns[expandedId]) return;
+    setLoadingBreakdown(expandedId);
+    fetch(`/api/count-results/${expandedId}/breakdown`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.count1 || data.count2) {
+          setBreakdowns(prev => ({ ...prev, [expandedId]: data }));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingBreakdown(null));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedId]);
 
   // Count how many zero/zero items are hidden
   const zeroZeroCount = useMemo(() =>
@@ -640,7 +662,7 @@ export default function ReconcilePage() {
                       {anyHasCount2 && (
                         <th className="text-center px-1 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider w-8" rowSpan={2}></th>
                       )}
-                      <th className="text-center px-1 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider" colSpan={2}
+                      <th className="text-center px-1 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider" colSpan={3}
                         style={{ borderBottom: 'none' }}
                       >
                         Count
@@ -655,6 +677,7 @@ export default function ReconcilePage() {
                     <tr className="border-b" style={{ borderColor: 'var(--card-border)' }}>
                       <th className="text-right px-2 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wider">Part</th>
                       <th className="text-right px-2 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wider">WIP</th>
+                      <th className="text-right px-2 py-1 text-[9px] font-semibold text-amber-600 uppercase tracking-wider">Ext</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -667,6 +690,8 @@ export default function ReconcilePage() {
                         isReviewable={!!isReviewable}
                         expanded={expandedId === r.id}
                         accepting={accepting === r.id}
+                        breakdown={breakdowns[r.id]}
+                        loadingBreakdown={loadingBreakdown === r.id}
                         onToggleExpand={() => setExpandedId(expandedId === r.id ? null : r.id)}
                         onAccept={(qty) => handleAcceptDeviation(r.id, qty)}
                         onUnaccept={() => handleUnaccept(r.id)}
@@ -772,9 +797,10 @@ const REASON_LABELS: Record<string, string> = {
   manual_supervisor_flag: 'Manually flagged by supervisor',
 };
 
-function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expanded, accepting, onToggleExpand, onAccept, onUnaccept, onToggleFlag, onToggleCount }: {
+function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expanded, accepting, breakdown, loadingBreakdown, onToggleExpand, onAccept, onUnaccept, onToggleFlag, onToggleCount }: {
   result: CountResult; anyHasCount2: boolean; showingCount2: boolean; isReviewable: boolean;
   expanded: boolean; accepting: boolean;
+  breakdown?: CounterBreakdown; loadingBreakdown?: boolean;
   onToggleExpand: () => void; onAccept: (qty: number) => void; onUnaccept: () => void;
   onToggleFlag: () => void; onToggleCount: () => void;
 }) {
@@ -804,8 +830,8 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
     : { label: 'M', bg: 'var(--primary-light)', color: 'var(--primary)', border: 'var(--primary)' };
 
   const hasCount2Data = r.count2_qty !== null;
-  // Column count: St + Tier + Part# + Desc + Pastel + [C1/C2] + Part + WIP + Var + % + Status + [Actions]
-  const colCount = (anyHasCount2 ? 1 : 0) + (isReviewable ? 11 : 10);
+  // Column count: St + Tier + Part# + Desc + Pastel + [C1/C2] + Part + WIP + Ext + Var + % + Status + [Actions]
+  const colCount = (anyHasCount2 ? 1 : 0) + (isReviewable ? 12 : 11);
 
   return (
     <>
@@ -864,10 +890,13 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
             <span className="text-[var(--muted-light)]">—</span>
           ) : <span className="text-[var(--muted-light)]">—</span>}
         </td>
-        {/* Count: WIP sub-column (BOM + chain credits + external) */}
+        {/* Count: WIP sub-column (BOM + chain credits) */}
         <td className="px-2 py-2 text-xs text-right font-mono text-[var(--muted)]">
           {activeWip ? activeWip : ''}
-          {activeExternal ? <span className="text-amber-600 ml-1" title="External supplier stock">+{activeExternal}e</span> : ''}
+        </td>
+        {/* Count: EXT sub-column (external supplier stock) */}
+        <td className="px-2 py-2 text-xs text-right font-mono text-amber-600">
+          {activeExternal ? activeExternal : ''}
         </td>
         {/* Variance */}
         <td className="px-3 py-2 text-xs text-right font-mono font-bold" style={{ color: varianceColor }}>
@@ -984,6 +1013,49 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
                 <div className="col-span-2">
                   <div className="text-[10px] font-semibold text-[var(--muted)] uppercase mb-0.5">Accepted By</div>
                   <div>{r.accepted_by} {r.accepted_at ? `at ${new Date(r.accepted_at).toLocaleString()}` : ''}</div>
+                </div>
+              )}
+              {/* Per-counter breakdown */}
+              {loadingBreakdown && (
+                <div className="col-span-2 md:col-span-4 text-[11px] text-[var(--muted)]">Loading counter breakdown...</div>
+              )}
+              {breakdown && (breakdown.count1.length > 0 || breakdown.count2.length > 0) && (
+                <div className="col-span-2 md:col-span-4">
+                  <div className="text-[10px] font-semibold text-[var(--muted)] uppercase mb-1">Counter Breakdown</div>
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    {breakdown.count1.length > 0 && (
+                      <div>
+                        <div className="text-[10px] text-[var(--muted)] mb-0.5">Count 1</div>
+                        {breakdown.count1.map((c, i) => (
+                          <div key={i} className="text-[11px] flex items-center gap-2">
+                            <span className="font-medium w-20 truncate">{c.counter}</span>
+                            <span className="font-mono font-bold">{c.total}</span>
+                            {(c.wip > 0 || c.ext > 0) && (
+                              <span className="text-[10px] text-[var(--muted)]">
+                                ({c.direct} part{c.wip ? ` + ${c.wip} wip` : ''}{c.ext ? ` + ${c.ext} ext` : ''})
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {breakdown.count2.length > 0 && (
+                      <div>
+                        <div className="text-[10px] text-[var(--muted)] mb-0.5">Count 2</div>
+                        {breakdown.count2.map((c, i) => (
+                          <div key={i} className="text-[11px] flex items-center gap-2">
+                            <span className="font-medium w-20 truncate">{c.counter}</span>
+                            <span className="font-mono font-bold">{c.total}</span>
+                            {(c.wip > 0 || c.ext > 0) && (
+                              <span className="text-[10px] text-[var(--muted)]">
+                                ({c.direct} part{c.wip ? ` + ${c.wip} wip` : ''}{c.ext ? ` + ${c.ext} ext` : ''})
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

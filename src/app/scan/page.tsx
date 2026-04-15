@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { ScanLine, Package, ArrowLeft, Check, X, Link2, Send, Trash2, Camera, Keyboard, Pencil, Warehouse, Delete, Building2 } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { ScanLine, Package, ArrowLeft, Check, X, Link2, Send, Trash2, Camera, Keyboard, Pencil, Warehouse, Delete, Building2, ChevronDown, ChevronRight, Upload, FileSpreadsheet } from 'lucide-react';
 import { CameraScanner } from '@/components/scan/CameraScanner';
 import { DiagnosticScanner } from '@/components/scan/DiagnosticScanner';
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import type { StockTake, ComponentChain } from '@/types';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -84,6 +85,12 @@ export default function ScanPage() {
   // External supplier stock mode
   const [isExternal, setIsExternal] = useState(false);
 
+  // External supplier Excel import
+  const [importPreview, setImportPreview] = useState<Array<{ part_number: string; description: string; vendor: string; quantity: number; notes: string; valid: boolean; error?: string }> | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const importFileRef = useRef<HTMLInputElement>(null);
+
   // Scanner — camera requires HTTPS, default set in useEffect
   const [scanMode, setScanMode] = useState<'camera' | 'manual'>('manual');
   const [isHttps, setIsHttps] = useState(false);
@@ -95,6 +102,33 @@ export default function ScanPage() {
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editQty, setEditQty] = useState('');
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [expandedChains, setExpandedChains] = useState<Set<string>>(new Set());
+
+  // Group items: parent + chained children together for display
+  const groupedItems = useMemo(() => {
+    const result: Array<{ parent: ScannedItem; children: ScannedItem[] }> = [];
+    let i = 0;
+    while (i < items.length) {
+      const item = items[i];
+      if (!item.chained) {
+        // Collect consecutive chained items with same scannedAt
+        const children: ScannedItem[] = [];
+        let j = i + 1;
+        while (j < items.length && items[j].chained && items[j].scannedAt === item.scannedAt) {
+          children.push(items[j]);
+          j++;
+        }
+        result.push({ parent: item, children });
+        i = j;
+      } else {
+        // Orphan chain — show as standalone
+        result.push({ parent: item, children: [] });
+        i++;
+      }
+    }
+    return result;
+  }, [items]);
 
   const barcodeRef = useRef<HTMLInputElement>(null);
   const qtyRef = useRef<HTMLInputElement>(null);
@@ -192,7 +226,7 @@ export default function ScanPage() {
           // Load existing records in background (non-blocking)
           fetchWithTimeout(`/api/scan-sessions/${saved.id}/records`)
             .then(r => r.ok ? r.json() : [])
-            .then(async (records: Array<{ id: string; barcode: string; quantity: number; scanned_at: string; store_code?: string }>) => {
+            .then(async (records: Array<{ id: string; barcode: string; quantity: number; scanned_at: string; store_code?: string; source?: string; chained_from?: string | null }>) => {
               if (!Array.isArray(records) || records.length === 0) return;
               setItems(records.map(r => ({
                 id: r.id,
@@ -201,6 +235,8 @@ export default function ScanPage() {
                 qty: r.quantity,
                 scannedAt: r.scanned_at,
                 storeCode: r.store_code || '001',
+                external: r.source === 'external',
+                chained: !!r.chained_from,
               })));
               // Fill descriptions in background
               const uniqueBarcodes: string[] = [...new Set(records.map(r => r.barcode))];
@@ -314,13 +350,15 @@ export default function ScanPage() {
             descMap[bc] = lookupData.found ? lookupData.description : 'Unknown part';
           } catch { descMap[bc] = 'Unknown part'; }
         }));
-        setItems(records.map((r: { id: string; barcode: string; quantity: number; scanned_at: string; store_code?: string }) => ({
+        setItems(records.map((r: { id: string; barcode: string; quantity: number; scanned_at: string; store_code?: string; source?: string; chained_from?: string | null }) => ({
           id: r.id,
           barcode: r.barcode,
           description: descMap[r.barcode] || 'Unknown part',
           qty: r.quantity,
           scannedAt: r.scanned_at,
           storeCode: r.store_code || '001',
+          external: r.source === 'external',
+          chained: !!r.chained_from,
         })));
       }
 
@@ -492,24 +530,46 @@ export default function ScanPage() {
     const newQty = parseInt(editQty, 10);
     if (isNaN(newQty) || newQty < 0) return;
 
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
+
+    // Build list of updates: parent + cascade to chained children
+    const updates: Array<{ id: string; oldQty: number; newQty: number }> = [
+      { id: itemId, oldQty: item.qty, newQty },
+    ];
+    if (!item.chained && item.qty > 0) {
+      // Find children and recalculate based on ratio (credit_qty multiplier)
+      for (const other of items) {
+        if (other.chained && other.scannedAt === item.scannedAt) {
+          const ratio = other.qty / item.qty;
+          const childNewQty = Math.round(newQty * ratio);
+          updates.push({ id: other.id, oldQty: other.qty, newQty: childNewQty });
+        }
+      }
+    }
+
     // Optimistic: update UI immediately
-    const oldQty = items.find(i => i.id === itemId)?.qty;
-    setItems(prev => prev.map(i => i.id === itemId ? { ...i, qty: newQty } : i));
+    setItems(prev => prev.map(i => {
+      const u = updates.find(u => u.id === i.id);
+      return u ? { ...i, qty: u.newQty } : i;
+    }));
     setEditingId(null);
     vibrate();
 
     try {
-      const res = await fetch(`/api/scan-records/${itemId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quantity: newQty }),
-      });
-      if (!res.ok) throw new Error('Failed to update');
+      await Promise.all(updates.map(u =>
+        fetch(`/api/scan-records/${u.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quantity: u.newQty }),
+        }).then(r => { if (!r.ok) throw new Error(); })
+      ));
     } catch {
       // Rollback on failure
-      if (oldQty !== undefined) {
-        setItems(prev => prev.map(i => i.id === itemId ? { ...i, qty: oldQty } : i));
-      }
+      setItems(prev => prev.map(i => {
+        const u = updates.find(u => u.id === i.id);
+        return u ? { ...i, qty: u.oldQty } : i;
+      }));
       setError('Failed to update quantity');
     }
   }, [editQty, items]);
@@ -523,17 +583,32 @@ export default function ScanPage() {
   const handleDelete = useCallback(async (itemId: string) => {
     if (!confirm('Delete this scan?')) return;
 
+    // Find the item and any chained children (cascade delete)
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
+    const idsToDelete = [itemId];
+    if (!item.chained) {
+      // Find children with same scannedAt
+      for (const other of items) {
+        if (other.chained && other.scannedAt === item.scannedAt && other.id !== itemId) {
+          idsToDelete.push(other.id);
+        }
+      }
+    }
+
     // Optimistic: remove from UI immediately
-    const removed = items.find(i => i.id === itemId);
-    setItems(prev => prev.filter(i => i.id !== itemId));
+    const removed = items.filter(i => idsToDelete.includes(i.id));
+    setItems(prev => prev.filter(i => !idsToDelete.includes(i.id)));
     vibrate();
 
     try {
-      const res = await fetch(`/api/scan-records/${itemId}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete');
+      // Delete all records (parent + children)
+      await Promise.all(idsToDelete.map(id =>
+        fetch(`/api/scan-records/${id}`, { method: 'DELETE' }).then(r => { if (!r.ok) throw new Error(); })
+      ));
     } catch {
       // Rollback on failure
-      if (removed) setItems(prev => [removed, ...prev]);
+      setItems(prev => [...removed, ...prev]);
       setError('Failed to delete scan');
     }
   }, [items]);
@@ -573,6 +648,81 @@ export default function ScanPage() {
       setError(e instanceof Error ? e.message : 'Failed to submit session');
     }
   }, [session]);
+
+  // ── External import handlers ──────────────────────────────────────────
+
+  const handleImportFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !session || !stockTake) return;
+    setImportFile(file);
+    setImporting(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('stock_take_id', stockTake.id);
+      formData.append('user_name', session.userName);
+
+      const res = await fetch(`/api/scan-sessions/${session.id}/import-external`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to parse file');
+
+      setImportPreview([...(data.valid || []), ...(data.invalid || [])]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed');
+      setImportFile(null);
+    } finally {
+      setImporting(false);
+      // Reset file input so same file can be re-selected
+      if (importFileRef.current) importFileRef.current.value = '';
+    }
+  }, [session, stockTake]);
+
+  const handleImportConfirm = useCallback(async () => {
+    if (!importFile || !session || !stockTake || !importPreview) return;
+    setImporting(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', importFile);
+      formData.append('stock_take_id', stockTake.id);
+      formData.append('user_name', session.userName);
+
+      const res = await fetch(`/api/scan-sessions/${session.id}/import-external?confirm=true`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Import failed');
+
+      // Add imported records to the items list
+      const now = new Date().toISOString();
+      const newItems: ScannedItem[] = (data.records || []).map((r: { id: string; barcode: string; quantity: number }) => ({
+        id: r.id,
+        barcode: r.barcode,
+        description: importPreview.find(p => p.part_number === r.barcode)?.description || '',
+        qty: Number(r.quantity),
+        scannedAt: now,
+        storeCode: '001',
+        external: true,
+      }));
+
+      setItems(prev => [...newItems, ...prev]);
+      setImportPreview(null);
+      setImportFile(null);
+      setFlash('success');
+      vibrate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  }, [importFile, session, stockTake, importPreview]);
 
   // ── Render ─────────────────────────────────────────────────────────────
 
@@ -838,7 +988,22 @@ export default function ScanPage() {
       {isExternal && (
         <div className="mx-4 mt-3 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>
           <Building2 size={14} />
-          External Stock Mode — entering quantities at suppliers
+          <span className="flex-1">External Stock Mode</span>
+          <input
+            ref={importFileRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleImportFileSelect}
+          />
+          <button
+            onClick={() => importFileRef.current?.click()}
+            disabled={importing}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold bg-amber-600 text-white hover:bg-amber-700 transition-colors disabled:opacity-50"
+          >
+            <Upload size={12} />
+            {importing ? 'Parsing...' : 'Import Excel'}
+          </button>
         </div>
       )}
 
@@ -1095,86 +1260,122 @@ export default function ScanPage() {
               </button>
             </div>
             <div className="space-y-1.5">
-              {items.map((item, i) => (
-                <div
-                  key={`${item.barcode}-${item.scannedAt}-${i}`}
-                  className="card px-3 py-2.5 flex items-center gap-3"
-                  style={item.chained ? { opacity: 0.7 } : undefined}
-                >
-                  {item.chained ? (
-                    <Link2 size={14} className="text-[var(--muted-light)] flex-shrink-0" />
-                  ) : item.external ? (
-                    <Building2 size={14} className="text-amber-500 flex-shrink-0" />
-                  ) : (
-                    <Check size={14} className="text-green-500 flex-shrink-0" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="font-mono text-xs font-medium truncate">{item.barcode}</div>
-                    <div className="text-[11px] text-[var(--muted)] truncate">
-                      <span className={`inline-block text-[9px] font-bold px-1 py-px rounded mr-1 ${
-                        item.storeCode === '002' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'
-                      }`}>
-                        {item.storeCode === '002' ? 'Q' : 'M'}
-                      </span>
-                      {item.external && (
-                        <span className="inline-block text-[9px] font-bold px-1 py-px rounded mr-1 bg-amber-100 text-amber-700">
-                          EXT
-                        </span>
+              {groupedItems.map((group, gi) => {
+                const { parent: item, children } = group;
+                const isChainExpanded = expandedChains.has(item.id);
+                return (
+                  <div key={`${item.barcode}-${item.scannedAt}-${gi}`}>
+                    {/* Parent row */}
+                    <div className="card px-3 py-2.5 flex items-center gap-3">
+                      {item.chained ? (
+                        <Link2 size={14} className="text-[var(--muted-light)] flex-shrink-0" />
+                      ) : item.external ? (
+                        <Building2 size={14} className="text-amber-500 flex-shrink-0" />
+                      ) : (
+                        <Check size={14} className="text-green-500 flex-shrink-0" />
                       )}
-                      {item.description}
-                    </div>
-                  </div>
-
-                  {editingId === item.id ? (
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      <input
-                        ref={editQtyRef}
-                        type="number"
-                        inputMode="numeric"
-                        value={editQty}
-                        onChange={(e) => setEditQty(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleSaveEdit(item.id);
-                          if (e.key === 'Escape') handleCancelEdit();
-                        }}
-                        className="w-14 text-center text-sm font-bold rounded-md border px-1 py-0.5"
-                        style={{ borderColor: 'var(--card-border)', fontFamily: 'var(--font-display)' }}
-                        min={0}
-                      />
-                      <button
-                        onClick={() => handleSaveEdit(item.id)}
-                        className="p-1 rounded-md text-green-600 hover:bg-green-50 active:bg-green-100"
-                      >
-                        <Check size={16} />
-                      </button>
-                      <button
-                        onClick={handleCancelEdit}
-                        className="p-1 rounded-md text-[var(--muted)] hover:bg-gray-100 active:bg-gray-200"
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <div className="text-sm font-bold mr-1" style={{ fontFamily: 'var(--font-display)' }}>
-                        {item.qty}
+                      <div className="flex-1 min-w-0">
+                        <div className="font-mono text-xs font-medium truncate flex items-center gap-1.5">
+                          {item.barcode}
+                          {children.length > 0 && (
+                            <button
+                              onClick={() => setExpandedChains(prev => {
+                                const next = new Set(prev);
+                                if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                                return next;
+                              })}
+                              className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-px rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                            >
+                              {isChainExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                              +{children.length} chain
+                            </button>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-[var(--muted)] truncate">
+                          <span className={`inline-block text-[9px] font-bold px-1 py-px rounded mr-1 ${
+                            item.storeCode === '002' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {item.storeCode === '002' ? 'Q' : 'M'}
+                          </span>
+                          {item.external && (
+                            <span className="inline-block text-[9px] font-bold px-1 py-px rounded mr-1 bg-amber-100 text-amber-700">
+                              EXT
+                            </span>
+                          )}
+                          {item.description}
+                        </div>
                       </div>
-                      <button
-                        onClick={() => handleStartEdit(item)}
-                        className="p-1.5 rounded-md text-[var(--muted)] hover:text-[var(--primary)] hover:bg-[var(--card-hover)] active:bg-gray-200 transition-colors"
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(item.id)}
-                        className="p-1.5 rounded-md text-[var(--muted)] hover:text-[var(--error)] hover:bg-red-50 active:bg-red-100 transition-colors"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+
+                      {editingId === item.id ? (
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <input
+                            ref={editQtyRef}
+                            type="number"
+                            inputMode="numeric"
+                            value={editQty}
+                            onChange={(e) => setEditQty(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveEdit(item.id);
+                              if (e.key === 'Escape') handleCancelEdit();
+                            }}
+                            className="w-14 text-center text-sm font-bold rounded-md border px-1 py-0.5"
+                            style={{ borderColor: 'var(--card-border)', fontFamily: 'var(--font-display)' }}
+                            min={0}
+                          />
+                          <button
+                            onClick={() => handleSaveEdit(item.id)}
+                            className="p-1 rounded-md text-green-600 hover:bg-green-50 active:bg-green-100"
+                          >
+                            <Check size={16} />
+                          </button>
+                          <button
+                            onClick={handleCancelEdit}
+                            className="p-1 rounded-md text-[var(--muted)] hover:bg-gray-100 active:bg-gray-200"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <div className="text-sm font-bold mr-1" style={{ fontFamily: 'var(--font-display)' }}>
+                            {item.qty}
+                          </div>
+                          <button
+                            onClick={() => handleStartEdit(item)}
+                            className="p-1.5 rounded-md text-[var(--muted)] hover:text-[var(--primary)] hover:bg-[var(--card-hover)] active:bg-gray-200 transition-colors"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(item.id)}
+                            className="p-1.5 rounded-md text-[var(--muted)] hover:text-[var(--error)] hover:bg-red-50 active:bg-red-100 transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
+
+                    {/* Chained children — collapsed by default */}
+                    {isChainExpanded && children.map((child, ci) => (
+                      <div
+                        key={`chain-${child.id}-${ci}`}
+                        className="card px-3 py-2 flex items-center gap-3 ml-4 mt-0.5 border-l-2 border-blue-200"
+                        style={{ opacity: 0.7 }}
+                      >
+                        <Link2 size={12} className="text-blue-400 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-mono text-[11px] font-medium truncate">{child.barcode}</div>
+                          <div className="text-[10px] text-[var(--muted)] truncate">{child.description}</div>
+                        </div>
+                        <div className="text-xs font-bold flex-shrink-0" style={{ fontFamily: 'var(--font-display)' }}>
+                          {child.qty}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
             </div>
           </>
         )}
@@ -1191,7 +1392,7 @@ export default function ScanPage() {
       {items.length > 0 && !pending && (
         <div className="flex-shrink-0 p-4 bg-white border-t" style={{ borderColor: 'var(--card-border)' }}>
           <button
-            onClick={handleSubmit}
+            onClick={() => setShowSubmitConfirm(true)}
             className="w-full h-14 rounded-xl text-white font-bold text-base flex items-center justify-center gap-2 transition-all"
             style={{ background: 'var(--primary)', fontFamily: 'var(--font-display)' }}
           >
@@ -1199,6 +1400,100 @@ export default function ScanPage() {
           </button>
         </div>
       )}
+
+      {/* External import preview modal */}
+      {importPreview && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40" onClick={() => { setImportPreview(null); setImportFile(null); }}>
+          <div
+            className="card w-full max-w-lg max-h-[85dvh] flex flex-col shadow-xl rounded-t-2xl sm:rounded-2xl sm:mx-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--card-border)' }}>
+              <div>
+                <h3 className="text-sm font-bold flex items-center gap-2" style={{ fontFamily: 'var(--font-display)' }}>
+                  <FileSpreadsheet size={16} className="text-amber-600" />
+                  Import External Stock
+                </h3>
+                <p className="text-[11px] text-[var(--muted)] mt-0.5">
+                  {importPreview.filter(r => r.valid).length} valid · {importPreview.filter(r => !r.valid).length} invalid · {importPreview.length} total
+                </p>
+              </div>
+              <button onClick={() => { setImportPreview(null); setImportFile(null); }} className="text-[var(--muted)] hover:text-[var(--foreground)] p-1">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b" style={{ borderColor: 'var(--card-border)' }}>
+                    <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase">Part Number</th>
+                    <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase">Vendor</th>
+                    <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase">Qty</th>
+                    <th className="text-center px-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {importPreview.map((row, i) => (
+                    <tr
+                      key={`${row.part_number}-${i}`}
+                      className="border-b"
+                      style={{ borderColor: 'var(--card-border)', opacity: row.valid ? 1 : 0.5 }}
+                    >
+                      <td className="px-2 py-1.5 font-mono font-medium">
+                        {row.part_number}
+                        {row.description && <div className="text-[10px] text-[var(--muted)] font-sans truncate max-w-[180px]">{row.description}</div>}
+                      </td>
+                      <td className="px-2 py-1.5 text-[var(--muted)]">{row.vendor}</td>
+                      <td className="px-2 py-1.5 text-right font-mono font-bold">{row.quantity || '—'}</td>
+                      <td className="px-2 py-1.5 text-center">
+                        {row.valid ? (
+                          <Check size={14} className="text-green-500 inline" />
+                        ) : (
+                          <span className="text-[9px] text-red-500" title={row.error}><X size={14} className="inline" /></span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {importPreview.some(r => !r.valid) && (
+                <div className="mt-2 text-[10px] text-red-500">
+                  {importPreview.filter(r => !r.valid).map((r, i) => (
+                    <div key={i}>{r.part_number}: {r.error}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t flex gap-2 justify-end" style={{ borderColor: 'var(--card-border)' }}>
+              <button
+                onClick={() => { setImportPreview(null); setImportFile(null); }}
+                className="h-9 px-4 rounded-lg border text-sm font-semibold transition-colors hover:bg-slate-50 cursor-pointer"
+                style={{ borderColor: 'var(--card-border)' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleImportConfirm}
+                disabled={importing || importPreview.filter(r => r.valid).length === 0}
+                className="h-9 px-4 rounded-lg text-sm font-semibold text-white cursor-pointer transition-colors hover:opacity-90 disabled:opacity-50"
+                style={{ background: '#d97706' }}
+              >
+                {importing ? 'Importing...' : `Import ${importPreview.filter(r => r.valid).length} items`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={showSubmitConfirm}
+        title="Submit Session"
+        message={`You have ${items.filter(i => !i.chained).length} items (${items.reduce((s, i) => s + i.qty, 0)} total qty). Submit this session? This cannot be undone.`}
+        confirmLabel="Submit"
+        cancelLabel="Cancel"
+        onConfirm={() => { setShowSubmitConfirm(false); handleSubmit(); }}
+        onCancel={() => setShowSubmitConfirm(false)}
+      />
     </div>
   );
 }
