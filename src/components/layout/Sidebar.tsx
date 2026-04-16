@@ -134,7 +134,7 @@ export function Sidebar() {
           className="text-white/20 text-[10px] overflow-hidden whitespace-nowrap hover:text-white/40 transition-colors cursor-pointer"
           style={{ opacity: expanded ? 1 : 0, transition: 'opacity 150ms' }}
         >
-          v0.3.17 · Apr 2026
+          v0.4.0 · Apr 2026
         </button>
       </div>
 
@@ -145,16 +145,23 @@ export function Sidebar() {
             <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--card-border)' }}>
               <div>
                 <h3 className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>What&apos;s New</h3>
-                <p className="text-[11px] text-[var(--muted)]">v0.3.17 — April 2026</p>
+                <p className="text-[11px] text-[var(--muted)]">v0.4.0 — April 2026</p>
               </div>
               <button onClick={() => setShowChangelog(false)} className="text-[var(--muted)] hover:text-[var(--foreground)] p-1">
                 <X size={18} />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 text-xs space-y-4">
-              <ChangelogSection title="v0.3.17 — Deviation Tile Polish" items={[
-                'Percentage symbol is now inline next to the number inside the rings (e.g., 5.6%)',
-                'Excluded items note moved to a shared footer under both tiles — applies to both calculations',
+              <ChangelogSection title="v0.4.0 — Recount Engine + Recon Polish" items={[
+                'Count 2 only updates flagged items + chain descendants + directly-scanned items',
+                'WIP explosion filtered to prevent contamination of unflagged components',
+                'Count 2 values preserved across subsequent recount rounds for out-of-scope items',
+                'External stock auto-carried from count 1 when not re-imported in count 2',
+                'Dual deviation rings: Quantity + Value with rescaled 0-20% visual range',
+                'C1/C2 toggle now drives deviation calc live; accepts based on lower variance',
+                'Sticky table header, Total column, variance decimal formatting, exclude from calc icon',
+                'Recount round-number resiliency: uses latest round with sessions',
+                'Per-row action icons right-aligned; Pastel qty bolded for easier comparison',
               ]} />
               <ChangelogSection title="v0.3.16 — Recon Summary Refresh" items={[
                 'Reconciliation summary redesigned with dual deviation tiles and refined typography',
