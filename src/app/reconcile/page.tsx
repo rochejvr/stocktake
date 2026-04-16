@@ -663,92 +663,32 @@ export default function ReconcilePage() {
               </div>
             )}
 
-            {/* Summary stats */}
+            {/* Summary card */}
             <div className="card p-0 overflow-hidden">
-              <div className="flex flex-col md:flex-row">
-                {/* Hero: Overall deviation */}
-                {/* Quantity deviation ring */}
-                <div className="flex-shrink-0 px-6 py-5 flex items-center gap-5 border-b md:border-b-0 md:border-r" style={{ borderColor: 'var(--card-border)' }}>
-                  <div className="relative w-20 h-20">
-                    <svg viewBox="0 0 36 36" className="w-20 h-20 -rotate-90">
-                      <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--card-border)" strokeWidth="2.5" />
-                      <circle
-                        cx="18" cy="18" r="15.9" fill="none"
-                        stroke={deviationStats.overallPct <= 3 ? '#22c55e' : deviationStats.overallPct <= 10 ? 'var(--warning)' : 'var(--error)'}
-                        strokeWidth="2.5"
-                        strokeDasharray={`${Math.min(100, 100 - deviationStats.overallPct)} 100`}
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-lg font-bold" style={{
-                        fontFamily: 'var(--font-display)',
-                        color: deviationStats.overallPct <= 3 ? '#22c55e' : deviationStats.overallPct <= 10 ? 'var(--warning)' : 'var(--error)',
-                      }}>
-                        {deviationStats.overallPct.toFixed(1)}%
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>Quantity Deviation</div>
-                    <div className="text-[11px] text-[var(--muted)] mt-0.5">
-                      {formatNum(deviationStats.totalAbsVariance)} var / {formatNum(deviationStats.totalPastel)} Pastel
-                      {deviationStats.excludedFromCalc > 0 && <span> · {deviationStats.excludedFromCalc} excluded</span>}
-                    </div>
-                  </div>
+              <div className="flex flex-col lg:flex-row">
+                {/* Primary deviations: quantity + value */}
+                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x" style={{ borderColor: 'var(--card-border)' }}>
+                  <DeviationTile
+                    label="Quantity Deviation"
+                    percent={deviationStats.overallPct}
+                    primary={`${formatNum(deviationStats.totalAbsVariance)} units variance`}
+                    secondary={`of ${formatNum(deviationStats.totalPastel)} Pastel units`}
+                    meta={deviationStats.excludedFromCalc > 0 ? `${deviationStats.excludedFromCalc} excluded` : undefined}
+                  />
+                  <DeviationTile
+                    label="Value Deviation"
+                    percent={deviationStats.valuePct}
+                    primary={`R${deviationStats.totalValueVariance.toLocaleString(undefined, { maximumFractionDigits: 0 })} variance`}
+                    secondary={`of R${deviationStats.totalStockValuation.toLocaleString(undefined, { maximumFractionDigits: 0 })} stock value`}
+                  />
                 </div>
-                {/* Value deviation ring */}
-                <div className="flex-shrink-0 px-6 py-5 flex items-center gap-5 border-b md:border-b-0 md:border-r" style={{ borderColor: 'var(--card-border)' }}>
-                  <div className="relative w-20 h-20">
-                    <svg viewBox="0 0 36 36" className="w-20 h-20 -rotate-90">
-                      <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--card-border)" strokeWidth="2.5" />
-                      <circle
-                        cx="18" cy="18" r="15.9" fill="none"
-                        stroke={deviationStats.valuePct <= 3 ? '#22c55e' : deviationStats.valuePct <= 10 ? 'var(--warning)' : 'var(--error)'}
-                        strokeWidth="2.5"
-                        strokeDasharray={`${Math.min(100, 100 - deviationStats.valuePct)} 100`}
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-lg font-bold" style={{
-                        fontFamily: 'var(--font-display)',
-                        color: deviationStats.valuePct <= 3 ? '#22c55e' : deviationStats.valuePct <= 10 ? 'var(--warning)' : 'var(--error)',
-                      }}>
-                        {deviationStats.valuePct.toFixed(1)}%
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>Value Deviation</div>
-                    <div className="text-[11px] text-[var(--muted)] mt-0.5">
-                      R{deviationStats.totalValueVariance.toLocaleString(undefined, { maximumFractionDigits: 2 })} var
-                    </div>
-                    <div className="text-[11px] text-[var(--muted)]">
-                      R{deviationStats.totalStockValuation.toLocaleString(undefined, { maximumFractionDigits: 2 })} valuation
-                    </div>
-                  </div>
-                </div>
-                {/* Secondary stats */}
-                <div className="flex-1 grid grid-cols-2 lg:grid-cols-4 divide-x" style={{ '--tw-divide-opacity': '1', borderColor: 'var(--card-border)' } as React.CSSProperties}>
-                  <div className="px-4 py-4 flex flex-col items-center justify-center">
-                    <div className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider">Total Parts</div>
-                    <div className="text-2xl font-bold mt-1" style={{ fontFamily: 'var(--font-display)' }}>{totalParts}</div>
-                  </div>
-                  <div className="px-4 py-4 flex flex-col items-center justify-center">
-                    <div className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider">Flagged</div>
-                    <div className="text-2xl font-bold mt-1" style={{ fontFamily: 'var(--font-display)', color: flaggedParts > 0 ? 'var(--warning)' : 'var(--foreground)' }}>{flaggedParts}</div>
-                  </div>
-                  <div className="px-4 py-4 flex flex-col items-center justify-center">
-                    <div className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider">Accepted</div>
-                    <div className="text-2xl font-bold mt-1" style={{ fontFamily: 'var(--font-display)', color: acceptedParts > 0 ? '#22c55e' : 'var(--foreground)' }}>{acceptedParts}</div>
-                  </div>
-                  <div className="px-4 py-4 flex flex-col items-center justify-center">
-                    <div className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider">Remaining</div>
-                    <div className="text-2xl font-bold mt-1" style={{ fontFamily: 'var(--font-display)', color: (totalParts - acceptedParts - uncountedParts) > 0 ? 'var(--foreground)' : '#22c55e' }}>
-                      {totalParts - acceptedParts - uncountedParts}
-                    </div>
-                  </div>
+
+                {/* Secondary counts */}
+                <div className="lg:w-[44%] lg:flex-shrink-0 border-t lg:border-t-0 lg:border-l grid grid-cols-4" style={{ borderColor: 'var(--card-border)' }}>
+                  <StatTile label="Total" value={totalParts} />
+                  <StatTile label="Flagged" value={flaggedParts} color={flaggedParts > 0 ? '#f59e0b' : undefined} />
+                  <StatTile label="Accepted" value={acceptedParts} color={acceptedParts > 0 ? '#10b981' : undefined} />
+                  <StatTile label="Remaining" value={totalParts - acceptedParts - uncountedParts} color={(totalParts - acceptedParts - uncountedParts) === 0 ? '#10b981' : undefined} />
                 </div>
               </div>
             </div>
@@ -917,6 +857,82 @@ function getActiveVariancePct(r: CountResult, count2Rows: Set<string>): number {
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────────
+
+function DeviationTile({ label, percent, primary, secondary, meta }: {
+  label: string; percent: number; primary: string; secondary: string; meta?: string;
+}) {
+  // Color tier: green ≤3%, amber ≤10%, red >10%
+  const accent = percent <= 3 ? '#10b981' : percent <= 10 ? '#f59e0b' : '#ef4444';
+  const tintBg = percent <= 3 ? 'rgba(16,185,129,0.08)' : percent <= 10 ? 'rgba(245,158,11,0.08)' : 'rgba(239,68,68,0.08)';
+  const dash = Math.max(0, Math.min(100, 100 - percent));
+  const gradId = `grad-${label.replace(/\s+/g, '-').toLowerCase()}`;
+
+  return (
+    <div className="px-7 py-6 flex items-center gap-6 relative overflow-hidden">
+      {/* Subtle tinted background by deviation level */}
+      <div className="absolute inset-0 pointer-events-none" style={{ background: tintBg }} />
+
+      <div className="relative w-[92px] h-[92px] flex-shrink-0">
+        <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
+          <defs>
+            <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor={accent} stopOpacity="0.85" />
+              <stop offset="100%" stopColor={accent} stopOpacity="1" />
+            </linearGradient>
+          </defs>
+          <circle cx="18" cy="18" r="15.5" fill="none" stroke="rgba(148,163,184,0.18)" strokeWidth="2.6" />
+          <circle
+            cx="18" cy="18" r="15.5" fill="none"
+            stroke={`url(#${gradId})`}
+            strokeWidth="2.6"
+            strokeDasharray={`${dash} 100`}
+            strokeLinecap="round"
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ fontFamily: 'var(--font-display)' }}>
+          <span className="text-[22px] font-bold leading-none tabular-nums" style={{ color: accent, letterSpacing: '-0.02em' }}>
+            {percent.toFixed(1)}
+          </span>
+          <span className="text-[9px] font-semibold mt-0.5 tracking-wider" style={{ color: accent, opacity: 0.7 }}>%</span>
+        </div>
+      </div>
+
+      <div className="relative min-w-0 flex-1">
+        <div className="text-[10px] font-semibold uppercase" style={{ color: 'var(--muted)', letterSpacing: '0.1em' }}>
+          {label}
+        </div>
+        <div className="text-[13px] font-semibold mt-1.5 tabular-nums" style={{ color: 'var(--foreground)' }}>
+          {primary}
+        </div>
+        <div className="text-[11px] mt-0.5 tabular-nums" style={{ color: 'var(--muted)' }}>
+          {secondary}
+        </div>
+        {meta && (
+          <div className="text-[10px] mt-1 italic" style={{ color: 'var(--muted-light)' }}>
+            {meta}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatTile({ label, value, color }: { label: string; value: number; color?: string }) {
+  return (
+    <div className="px-2 py-6 flex flex-col items-center justify-center gap-1.5 border-l first:border-l-0" style={{ borderColor: 'var(--card-border)' }}>
+      <div className="text-[9px] font-semibold uppercase" style={{ color: 'var(--muted)', letterSpacing: '0.12em' }}>
+        {label}
+      </div>
+      <div className="text-[26px] font-bold tabular-nums leading-none" style={{
+        fontFamily: 'var(--font-display)',
+        color: color || 'var(--foreground)',
+        letterSpacing: '-0.02em',
+      }}>
+        {value.toLocaleString()}
+      </div>
+    </div>
+  );
+}
 
 function StatPill({ label, value, color }: { label: string; value: number; color?: string }) {
   const colorMap: Record<string, string> = {
