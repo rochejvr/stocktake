@@ -120,8 +120,20 @@ export async function POST(
   // prevents WIP-scan explosions in count 2 from overwriting count1 for unflagged XMs,
   // while still allowing chain children of flagged parents to be updated when the
   // parent is re-scanned.
+  // Also: clear ALL count2_* columns at the start of recount aggregation so stale
+  // data from previous runs doesn't stick around for items that are no longer in scope.
   let flaggedKeys: Set<string> | undefined;
   if (isRecount) {
+    await supabase
+      .from('count_results')
+      .update({
+        count2_qty: null,
+        count2_direct_qty: null,
+        count2_wip_qty: null,
+        count2_external_qty: null,
+      })
+      .eq('stock_take_id', id);
+
     const { data: flaggedRows } = await supabase
       .from('count_results')
       .select('part_number, store_code')

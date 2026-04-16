@@ -134,7 +134,7 @@ export function Sidebar() {
           className="text-white/20 text-[10px] overflow-hidden whitespace-nowrap hover:text-white/40 transition-colors cursor-pointer"
           style={{ opacity: expanded ? 1 : 0, transition: 'opacity 150ms' }}
         >
-          v0.3.6 · Apr 2026
+          v0.3.7 · Apr 2026
         </button>
       </div>
 
@@ -145,13 +145,17 @@ export function Sidebar() {
             <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--card-border)' }}>
               <div>
                 <h3 className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>What&apos;s New</h3>
-                <p className="text-[11px] text-[var(--muted)]">v0.3.6 — April 2026</p>
+                <p className="text-[11px] text-[var(--muted)]">v0.3.7 — April 2026</p>
               </div>
               <button onClick={() => setShowChangelog(false)} className="text-[var(--muted)] hover:text-[var(--foreground)] p-1">
                 <X size={18} />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 text-xs space-y-4">
+              <ChangelogSection title="v0.3.7 — Clear Stale Count 2 Data" items={[
+                'End-counting in recount mode now clears all count2_* columns before re-aggregating',
+                'Fixes stale count2 values hanging around for unflagged items from earlier runs',
+              ]} />
               <ChangelogSection title="v0.3.6 — C2-Preference by Variance" items={[
                 'C1/C2 toggle, deviation calc, and auto-accept now prefer C2 only when |c2 − pastel| < |c1 − pastel|',
                 'Compares recount accuracy vs original, not raw quantity — fixes edge case where recount found more items but was more accurate',
