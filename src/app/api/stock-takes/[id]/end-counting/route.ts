@@ -28,9 +28,12 @@ export async function POST(
   const countNumber = isRecount ? 2 : 1;
   const countCol = isRecount ? 'count2_qty' : 'count1_qty';
 
-  // 2. Get scan sessions for this count number
-  // For recounts: only use sessions from the current round
-  const currentRound = st.current_round || 1;
+  // 2. Get scan sessions for this count number.
+  // For recounts: use sessions from the LATEST round that actually has sessions.
+  // This handles both workflows:
+  //  - Proper: counters submit + re-login after reopen → new sessions at current_round
+  //  - Resumed: counters log back into old sessions → sessions stay at their original round
+  // Either way, we pick the highest round_number that has scan activity.
   let sessionQuery = supabase
     .from('scan_sessions')
     .select('id')
@@ -38,7 +41,16 @@ export async function POST(
     .eq('count_number', countNumber);
 
   if (isRecount) {
-    sessionQuery = sessionQuery.eq('round_number', currentRound);
+    const { data: latestRoundRow } = await supabase
+      .from('scan_sessions')
+      .select('round_number')
+      .eq('stock_take_id', id)
+      .eq('count_number', countNumber)
+      .order('round_number', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const targetRound = latestRoundRow?.round_number ?? (st.current_round || 1);
+    sessionQuery = sessionQuery.eq('round_number', targetRound);
   }
 
   const { data: sessions } = await sessionQuery;

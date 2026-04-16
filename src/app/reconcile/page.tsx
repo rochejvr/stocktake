@@ -784,8 +784,8 @@ export default function ReconcilePage() {
             </div>
 
             {/* Results table */}
-            <div className="card overflow-hidden">
-              <div className="overflow-x-auto">
+            <div className="card" style={{ overflow: 'visible' }}>
+              <div style={{ overflowX: 'auto', overflowY: 'visible' }}>
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 z-10 bg-white" style={{ boxShadow: '0 1px 0 var(--card-border)' }}>
                     {/* Two-row header: main row + sub-columns for Count */}
