@@ -667,20 +667,26 @@ export default function ReconcilePage() {
             <div className="card p-0 overflow-hidden">
               <div className="flex flex-col lg:flex-row">
                 {/* Primary deviations: quantity + value */}
-                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x" style={{ borderColor: 'var(--card-border)' }}>
-                  <DeviationTile
-                    label="Quantity Deviation"
-                    percent={deviationStats.overallPct}
-                    primary={`${formatNum(deviationStats.totalAbsVariance)} units variance`}
-                    secondary={`of ${formatNum(deviationStats.totalPastel)} Pastel units`}
-                    meta={deviationStats.excludedFromCalc > 0 ? `${deviationStats.excludedFromCalc} excluded` : undefined}
-                  />
-                  <DeviationTile
-                    label="Value Deviation"
-                    percent={deviationStats.valuePct}
-                    primary={`R${deviationStats.totalValueVariance.toLocaleString(undefined, { maximumFractionDigits: 0 })} variance`}
-                    secondary={`of R${deviationStats.totalStockValuation.toLocaleString(undefined, { maximumFractionDigits: 0 })} stock value`}
-                  />
+                <div className="flex-1 flex flex-col">
+                  <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x" style={{ borderColor: 'var(--card-border)' }}>
+                    <DeviationTile
+                      label="Quantity Deviation"
+                      percent={deviationStats.overallPct}
+                      primary={`${formatNum(deviationStats.totalAbsVariance)} units variance`}
+                      secondary={`of ${formatNum(deviationStats.totalPastel)} Pastel units`}
+                    />
+                    <DeviationTile
+                      label="Value Deviation"
+                      percent={deviationStats.valuePct}
+                      primary={`R${deviationStats.totalValueVariance.toLocaleString(undefined, { maximumFractionDigits: 0 })} variance`}
+                      secondary={`of R${deviationStats.totalStockValuation.toLocaleString(undefined, { maximumFractionDigits: 0 })} stock value`}
+                    />
+                  </div>
+                  {deviationStats.excludedFromCalc > 0 && (
+                    <div className="px-7 py-1.5 text-[10px] italic border-t" style={{ color: 'var(--muted-light)', borderColor: 'var(--card-border)' }}>
+                      {deviationStats.excludedFromCalc} {deviationStats.excludedFromCalc === 1 ? 'item' : 'items'} excluded from both calculations
+                    </div>
+                  )}
                 </div>
 
                 {/* Secondary counts */}
@@ -858,8 +864,8 @@ function getActiveVariancePct(r: CountResult, count2Rows: Set<string>): number {
 
 // ── Sub-components ──────────────────────────────────────────────────────────
 
-function DeviationTile({ label, percent, primary, secondary, meta }: {
-  label: string; percent: number; primary: string; secondary: string; meta?: string;
+function DeviationTile({ label, percent, primary, secondary }: {
+  label: string; percent: number; primary: string; secondary: string;
 }) {
   // Color tier: green ≤3%, amber ≤10%, red >10%
   const accent = percent <= 3 ? '#10b981' : percent <= 10 ? '#f59e0b' : '#ef4444';
@@ -889,11 +895,11 @@ function DeviationTile({ label, percent, primary, secondary, meta }: {
             strokeLinecap="round"
           />
         </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ fontFamily: 'var(--font-display)' }}>
+        <div className="absolute inset-0 flex items-baseline justify-center" style={{ fontFamily: 'var(--font-display)' }}>
           <span className="text-[22px] font-bold leading-none tabular-nums" style={{ color: accent, letterSpacing: '-0.02em' }}>
             {percent.toFixed(1)}
           </span>
-          <span className="text-[9px] font-semibold mt-0.5 tracking-wider" style={{ color: accent, opacity: 0.7 }}>%</span>
+          <span className="text-[13px] font-semibold ml-0.5" style={{ color: accent, opacity: 0.75 }}>%</span>
         </div>
       </div>
 
@@ -907,11 +913,6 @@ function DeviationTile({ label, percent, primary, secondary, meta }: {
         <div className="text-[11px] mt-0.5 tabular-nums" style={{ color: 'var(--muted)' }}>
           {secondary}
         </div>
-        {meta && (
-          <div className="text-[10px] mt-1 italic" style={{ color: 'var(--muted-light)' }}>
-            {meta}
-          </div>
-        )}
       </div>
     </div>
   );
