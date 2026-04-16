@@ -16,6 +16,15 @@ type SortDir = 'asc' | 'desc';
 type CounterEntry = { counter: string; direct: number; wip: number; ext: number; total: number };
 type CounterBreakdown = { count1: CounterEntry[]; count2: CounterEntry[] };
 
+// Prefer C2 only when its variance (|c2 - pastel|) is lower than C1's variance.
+// A recount that's "closer to Pastel" is assumed to be the more accurate physical count.
+function shouldPreferCount2(r: { count1_qty: number | null; count2_qty: number | null; pastel_qty: number }): boolean {
+  if (r.count2_qty === null || r.count1_qty === null) return false;
+  const c1Var = Math.abs(r.count1_qty - r.pastel_qty);
+  const c2Var = Math.abs(r.count2_qty - r.pastel_qty);
+  return c2Var < c1Var;
+}
+
 export default function ReconcilePage() {
   const [stockTake, setStockTake] = useState<StockTake | null>(null);
   const [results, setResults] = useState<CountResult[]>([]);
@@ -52,13 +61,11 @@ export default function ReconcilePage() {
         const crData = await crRes.json();
         const arr: CountResult[] = Array.isArray(crData) ? crData : [];
         setResults(arr);
-        // Pre-populate C1/C2 toggle: default to C2 when recount found a lower value
-        // (more accurate physical count). User can still toggle manually per row.
+        // Pre-populate C1/C2 toggle: default to C2 when recount variance is smaller
+        // (closer to Pastel = more accurate physical count). User can toggle manually.
         const autoC2 = new Set<string>();
         for (const r of arr) {
-          if (r.count2_qty !== null && r.count1_qty !== null && r.count2_qty < r.count1_qty) {
-            autoC2.add(r.id);
-          }
+          if (shouldPreferCount2(r)) autoC2.add(r.id);
         }
         setCount2Rows(autoC2);
       }
@@ -72,9 +79,7 @@ export default function ReconcilePage() {
   useEffect(() => {
     if (stockTake?.status !== 'reviewing') return;
     const pickActive = (r: CountResult) => {
-      // c2 only if recount found a lower value (more accurate physical count); else c1
-      const useC2 = r.count2_qty !== null && r.count1_qty !== null && r.count2_qty < r.count1_qty;
-      return useC2 ? r.count2_qty : r.count1_qty;
+      return shouldPreferCount2(r) ? r.count2_qty : r.count1_qty;
     };
     const toAutoAccept = results.filter(r => {
       if (r.deviation_accepted === true) return false;
@@ -205,9 +210,8 @@ export default function ReconcilePage() {
     let countedParts = 0;
     for (const r of results) {
       totalPastel += r.pastel_qty;
-      // Pick active count: accepted first, then c2 if recount found less, else c1
-      const useC2 = r.count2_qty !== null && r.count1_qty !== null && r.count2_qty < r.count1_qty;
-      const counted = r.accepted_qty ?? (useC2 ? r.count2_qty : r.count1_qty);
+      // Pick active count: accepted first, then c2 if recount variance is smaller, else c1
+      const counted = r.accepted_qty ?? (shouldPreferCount2(r) ? r.count2_qty : r.count1_qty);
       if (counted === null) continue;
       countedParts++;
       totalCounted += counted;
