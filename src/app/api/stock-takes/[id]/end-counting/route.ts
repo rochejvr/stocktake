@@ -193,8 +193,28 @@ export async function POST(
       .from('scan_records')
       .select('barcode, quantity, store_code, chained_from, source')
       .in('session_id', sessionIds);
-    // In recount mode, filter contributions to flagged items only
-    aggregateRecords(records || [], scanDirect, scanWip, scanExternal, scanTotals, flaggedKeys);
+    const allRecords = records || [];
+
+    // Expand flaggedKeys: any XM that was directly scanned (or imported as external)
+    // in count 2 is an intentional recount action, regardless of its flag status.
+    // This prevents the filter from hiding legitimate counter-initiated scans while
+    // still blocking WIP-explosion collateral on truly untouched items.
+    if (isRecount && flaggedKeys) {
+      for (const r of allRecords) {
+        const store = r.store_code || '001';
+        const key = `${r.barcode}|${store}`;
+        // Skip WIP-code scans — those are handled by the filter (only credit flagged
+        // components via BOM explosion). Only direct scans / external / chain-credits
+        // on the XM itself indicate intent for this specific item.
+        const isWipCode = !r.chained_from && !!bomLookup[r.barcode.toLowerCase()];
+        if (!isWipCode) {
+          flaggedKeys.add(key);
+        }
+      }
+    }
+
+    // In recount mode, filter contributions to flagged items (incl. direct-scan expansion)
+    aggregateRecords(allRecords, scanDirect, scanWip, scanExternal, scanTotals, flaggedKeys);
   }
 
   // For recounts: also re-aggregate count1 from count_number=1 sessions
