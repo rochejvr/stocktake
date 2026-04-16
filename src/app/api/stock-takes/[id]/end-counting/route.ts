@@ -205,6 +205,22 @@ export async function POST(
         .in('session_id', c1SessionIds);
       aggregateRecords(c1Records || [], c1Direct, c1Wip, c1External, c1Totals);
     }
+
+    // External supplier stock is offsite and easily forgotten during recount.
+    // If a flagged item was physically recounted in count 2 but external was NOT
+    // re-imported, carry over the count 1 external value as the default.
+    // Counters can still explicitly override by re-importing external in count 2.
+    if (flaggedKeys) {
+      for (const key of flaggedKeys) {
+        const hasPhysicalC2 = (scanDirect[key] || 0) > 0 || (scanWip[key] || 0) > 0;
+        const c2External = scanExternal[key] || 0;
+        const c1Ext = c1External[key] || 0;
+        if (hasPhysicalC2 && c2External === 0 && c1Ext > 0) {
+          scanExternal[key] = c1Ext;
+          scanTotals[key] = (scanTotals[key] || 0) + c1Ext;
+        }
+      }
+    }
   }
 
   // 3. Get all Pastel inventory for this stock take (paginate past 1000 row limit)

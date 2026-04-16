@@ -134,7 +134,7 @@ export function Sidebar() {
           className="text-white/20 text-[10px] overflow-hidden whitespace-nowrap hover:text-white/40 transition-colors cursor-pointer"
           style={{ opacity: expanded ? 1 : 0, transition: 'opacity 150ms' }}
         >
-          v0.3.7 · Apr 2026
+          v0.3.8 · Apr 2026
         </button>
       </div>
 
@@ -145,13 +145,18 @@ export function Sidebar() {
             <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--card-border)' }}>
               <div>
                 <h3 className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>What&apos;s New</h3>
-                <p className="text-[11px] text-[var(--muted)]">v0.3.7 — April 2026</p>
+                <p className="text-[11px] text-[var(--muted)]">v0.3.8 — April 2026</p>
               </div>
               <button onClick={() => setShowChangelog(false)} className="text-[var(--muted)] hover:text-[var(--foreground)] p-1">
                 <X size={18} />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 text-xs space-y-4">
+              <ChangelogSection title="v0.3.8 — External Stock Carry-Over" items={[
+                'External supplier stock is now auto-carried over from count 1 to count 2 for flagged items that were physically recounted',
+                'Counter can still override by re-importing external stock in count 2',
+                'Prevents the common case where offsite external stock is forgotten during recount',
+              ]} />
               <ChangelogSection title="v0.3.7 — Clear Stale Count 2 Data" items={[
                 'End-counting in recount mode now clears all count2_* columns before re-aggregating',
                 'Fixes stale count2 values hanging around for unflagged items from earlier runs',
