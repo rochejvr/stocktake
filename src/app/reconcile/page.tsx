@@ -226,7 +226,8 @@ export default function ReconcilePage() {
   // Overall deviation: sum(abs(variance)) / sum(counted qty) across all counted items
   const deviationStats = useMemo(() => {
     let totalCounted = 0;
-    let totalPastel = 0;        // stable baseline — all inventory, regardless of count state
+    let totalPastel = 0;            // stable baseline — all inventory, regardless of count state
+    let totalStockValuation = 0;    // sum of pastel_qty × unit_cost across all rows
     let totalAbsVariance = 0;
     let totalValueVariance = 0;
     let countedParts = 0;
@@ -237,6 +238,7 @@ export default function ReconcilePage() {
         continue; // excluded from BOTH numerator and denominator
       }
       totalPastel += r.pastel_qty;
+      if (r.unit_cost) totalStockValuation += r.pastel_qty * Number(r.unit_cost);
       // Pick active count: accepted first, then whichever count the per-row C1/C2 toggle is set to.
       // count2Rows is pre-populated by shouldPreferCount2 on load, but follows user toggles thereafter.
       const useC2 = count2Rows.has(r.id) && r.count2_qty !== null;
@@ -248,9 +250,11 @@ export default function ReconcilePage() {
       totalAbsVariance += Math.abs(variance);
       if (r.unit_cost) totalValueVariance += Math.abs(variance) * Number(r.unit_cost);
     }
-    // Deviation as % of expected stock (Pastel inventory) — stable between counts
+    // Quantity deviation: abs variance / total Pastel qty
     const overallPct = totalPastel > 0 ? (totalAbsVariance / totalPastel) * 100 : 0;
-    return { totalCounted, totalPastel, totalAbsVariance, totalValueVariance, overallPct, countedParts, excludedFromCalc };
+    // Value deviation: value variance / total stock valuation
+    const valuePct = totalStockValuation > 0 ? (totalValueVariance / totalStockValuation) * 100 : 0;
+    return { totalCounted, totalPastel, totalStockValuation, totalAbsVariance, totalValueVariance, overallPct, valuePct, countedParts, excludedFromCalc };
   }, [results, excludedIds, count2Rows]);
 
   // Accept deviation — uses the active count qty
@@ -663,6 +667,7 @@ export default function ReconcilePage() {
             <div className="card p-0 overflow-hidden">
               <div className="flex flex-col md:flex-row">
                 {/* Hero: Overall deviation */}
+                {/* Quantity deviation ring */}
                 <div className="flex-shrink-0 px-6 py-5 flex items-center gap-5 border-b md:border-b-0 md:border-r" style={{ borderColor: 'var(--card-border)' }}>
                   <div className="relative w-20 h-20">
                     <svg viewBox="0 0 36 36" className="w-20 h-20 -rotate-90">
@@ -685,19 +690,43 @@ export default function ReconcilePage() {
                     </div>
                   </div>
                   <div>
-                    <div className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>Overall Deviation</div>
+                    <div className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>Quantity Deviation</div>
                     <div className="text-[11px] text-[var(--muted)] mt-0.5">
-                      {formatNum(deviationStats.totalAbsVariance)} variance / {formatNum(deviationStats.totalPastel)} Pastel inventory
+                      {formatNum(deviationStats.totalAbsVariance)} var / {formatNum(deviationStats.totalPastel)} Pastel
                       {deviationStats.excludedFromCalc > 0 && <span> · {deviationStats.excludedFromCalc} excluded</span>}
                     </div>
-                    <div className="text-[11px] text-[var(--muted)]">
-                      {deviationStats.countedParts.toLocaleString()} of {totalParts.toLocaleString()} parts counted
+                  </div>
+                </div>
+                {/* Value deviation ring */}
+                <div className="flex-shrink-0 px-6 py-5 flex items-center gap-5 border-b md:border-b-0 md:border-r" style={{ borderColor: 'var(--card-border)' }}>
+                  <div className="relative w-20 h-20">
+                    <svg viewBox="0 0 36 36" className="w-20 h-20 -rotate-90">
+                      <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--card-border)" strokeWidth="2.5" />
+                      <circle
+                        cx="18" cy="18" r="15.9" fill="none"
+                        stroke={deviationStats.valuePct <= 3 ? '#22c55e' : deviationStats.valuePct <= 10 ? 'var(--warning)' : 'var(--error)'}
+                        strokeWidth="2.5"
+                        strokeDasharray={`${Math.min(100, 100 - deviationStats.valuePct)} 100`}
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <span className="text-lg font-bold" style={{
+                        fontFamily: 'var(--font-display)',
+                        color: deviationStats.valuePct <= 3 ? '#22c55e' : deviationStats.valuePct <= 10 ? 'var(--warning)' : 'var(--error)',
+                      }}>
+                        {deviationStats.valuePct.toFixed(1)}%
+                      </span>
                     </div>
-                    {deviationStats.totalValueVariance > 0 && (
-                      <div className="text-[11px] text-[var(--muted)]">
-                        R{deviationStats.totalValueVariance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} value variance
-                      </div>
-                    )}
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>Value Deviation</div>
+                    <div className="text-[11px] text-[var(--muted)] mt-0.5">
+                      R{deviationStats.totalValueVariance.toLocaleString(undefined, { maximumFractionDigits: 2 })} var
+                    </div>
+                    <div className="text-[11px] text-[var(--muted)]">
+                      R{deviationStats.totalStockValuation.toLocaleString(undefined, { maximumFractionDigits: 2 })} valuation
+                    </div>
                   </div>
                 </div>
                 {/* Secondary stats */}

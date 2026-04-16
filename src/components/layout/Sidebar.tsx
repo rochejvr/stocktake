@@ -134,7 +134,7 @@ export function Sidebar() {
           className="text-white/20 text-[10px] overflow-hidden whitespace-nowrap hover:text-white/40 transition-colors cursor-pointer"
           style={{ opacity: expanded ? 1 : 0, transition: 'opacity 150ms' }}
         >
-          v0.3.14 · Apr 2026
+          v0.3.15 · Apr 2026
         </button>
       </div>
 
@@ -145,13 +145,19 @@ export function Sidebar() {
             <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--card-border)' }}>
               <div>
                 <h3 className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>What&apos;s New</h3>
-                <p className="text-[11px] text-[var(--muted)]">v0.3.14 — April 2026</p>
+                <p className="text-[11px] text-[var(--muted)]">v0.3.15 — April 2026</p>
               </div>
               <button onClick={() => setShowChangelog(false)} className="text-[var(--muted)] hover:text-[var(--foreground)] p-1">
                 <X size={18} />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 text-xs space-y-4">
+              <ChangelogSection title="v0.3.15 — Value Deviation + Dual Rings" items={[
+                'Added Value Deviation ring alongside Quantity Deviation',
+                'Value Deviation = |value variance| / total stock valuation (R)',
+                'Stock Valuation = sum of pastel_qty × unit_cost across all rows',
+                'Removed "X of X parts counted" line — replaced with stock valuation R-value',
+              ]} />
               <ChangelogSection title="v0.3.14 — Action Alignment + Live C1/C2 Deviation" items={[
                 'Action icons (accept, flag, exclude) right-aligned in their column',
                 'Deviation summary now updates in real-time when you toggle C1/C2 per row',
