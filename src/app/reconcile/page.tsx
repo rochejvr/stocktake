@@ -867,6 +867,7 @@ const REASON_LABELS: Record<string, string> = {
   variance_exceeds_threshold: 'Variance exceeds tier threshold',
   round_number_variance: 'Suspiciously round variance',
   zero_count_with_pastel_balance: 'Zero count but Pastel has stock',
+  uncounted_pastel_balance: 'Not counted but Pastel has stock',
   significant_change_vs_prior: 'Significant change vs prior period',
   manual_supervisor_flag: 'Manually flagged by supervisor',
 };

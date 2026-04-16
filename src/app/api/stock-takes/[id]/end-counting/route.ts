@@ -178,8 +178,10 @@ export async function POST(
     if (isRecount && counted === null) {
       // Only update count1 columns (don't touch count2)
       const c1Total = c1Totals[key] ?? null;
-      if (c1Total !== null) {
-        upserts.push({
+      // If item was never counted but Pastel has stock, flag for recount
+      const isUncountedWithStock = c1Total === null && pastelQty > 0;
+      if (c1Total !== null || isUncountedWithStock) {
+        const row: Record<string, unknown> = {
           stock_take_id: id,
           part_number: inv.part_number,
           description: inv.description,
@@ -191,7 +193,13 @@ export async function POST(
           count1_direct_qty: c1Direct[key] ?? null,
           count1_wip_qty: c1Wip[key] ?? null,
           count1_external_qty: c1External[key] ?? null,
-        });
+        };
+        if (isUncountedWithStock) {
+          row.recount_flagged = true;
+          row.recount_reasons = ['uncounted_pastel_balance'];
+          flaggedCount++;
+        }
+        upserts.push(row);
         matchedKeys.add(key);
       }
       continue;
@@ -238,6 +246,12 @@ export async function POST(
 
       recountFlagged = recountReasons.length > 0;
       if (recountFlagged) flaggedCount++;
+    } else if (pastelQty > 0) {
+      // Item not scanned at all, but Pastel shows stock — flag for recount
+      // (variance left as null because the actual quantity is unknown)
+      recountReasons.push('uncounted_pastel_balance');
+      recountFlagged = true;
+      flaggedCount++;
     }
 
     const directCol = isRecount ? 'count2_direct_qty' : 'count1_direct_qty';
