@@ -166,6 +166,8 @@ export async function POST(
   let flaggedCount = 0;
   const upserts = [];
   const matchedKeys = new Set<string>();
+  // Flag updates handled separately to avoid mixed-column batch upsert (NOT NULL violation)
+  const flagUpdates: Array<{ part_number: string; store_code: string; reason: string }> = [];
 
   for (const inv of inventory) {
     const key = `${inv.part_number}|${inv.store_code}`;
@@ -178,10 +180,10 @@ export async function POST(
     if (isRecount && counted === null) {
       // Only update count1 columns (don't touch count2)
       const c1Total = c1Totals[key] ?? null;
-      // If item was never counted but Pastel has stock, flag for recount
+      // If item was never counted but Pastel has stock, flag for recount (separate update)
       const isUncountedWithStock = c1Total === null && pastelQty > 0;
-      if (c1Total !== null || isUncountedWithStock) {
-        const row: Record<string, unknown> = {
+      if (c1Total !== null) {
+        upserts.push({
           stock_take_id: id,
           part_number: inv.part_number,
           description: inv.description,
@@ -193,14 +195,12 @@ export async function POST(
           count1_direct_qty: c1Direct[key] ?? null,
           count1_wip_qty: c1Wip[key] ?? null,
           count1_external_qty: c1External[key] ?? null,
-        };
-        if (isUncountedWithStock) {
-          row.recount_flagged = true;
-          row.recount_reasons = ['uncounted_pastel_balance'];
-          flaggedCount++;
-        }
-        upserts.push(row);
+        });
         matchedKeys.add(key);
+      }
+      if (isUncountedWithStock) {
+        flagUpdates.push({ part_number: inv.part_number, store_code: inv.store_code, reason: 'uncounted_pastel_balance' });
+        flaggedCount++;
       }
       continue;
     }
@@ -331,6 +331,16 @@ export async function POST(
     if (upsertErr) {
       return NextResponse.json({ error: `Failed to save results: ${upsertErr.message}` }, { status: 500 });
     }
+  }
+
+  // Apply flag updates separately (avoids mixing schemas in batched upsert)
+  for (const fu of flagUpdates) {
+    await supabase
+      .from('count_results')
+      .update({ recount_flagged: true, recount_reasons: [fu.reason] })
+      .eq('stock_take_id', id)
+      .eq('part_number', fu.part_number)
+      .eq('store_code', fu.store_code);
   }
 
   // 5. Advance status

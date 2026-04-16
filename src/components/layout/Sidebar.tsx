@@ -134,7 +134,7 @@ export function Sidebar() {
           className="text-white/20 text-[10px] overflow-hidden whitespace-nowrap hover:text-white/40 transition-colors cursor-pointer"
           style={{ opacity: expanded ? 1 : 0, transition: 'opacity 150ms' }}
         >
-          v0.3.2 · Apr 2026
+          v0.3.3 · Apr 2026
         </button>
       </div>
 
@@ -145,13 +145,17 @@ export function Sidebar() {
             <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--card-border)' }}>
               <div>
                 <h3 className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>What&apos;s New</h3>
-                <p className="text-[11px] text-[var(--muted)]">v0.3.2 — April 2026</p>
+                <p className="text-[11px] text-[var(--muted)]">v0.3.3 — April 2026</p>
               </div>
               <button onClick={() => setShowChangelog(false)} className="text-[var(--muted)] hover:text-[var(--foreground)] p-1">
                 <X size={18} />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 text-xs space-y-4">
+              <ChangelogSection title="v0.3.3 — End Counting Crash Fix" items={[
+                'Fixed NOT NULL constraint error on recount_flagged when ending count 2',
+                'Flag updates now applied as separate query to keep batch upsert schemas consistent',
+              ]} />
               <ChangelogSection title="v0.3.2 — Uncounted Items Flagged" items={[
                 'Items with Pastel stock that were never scanned now flag for recount automatically',
                 'Variance left blank (unknown actual qty) — but item appears on recount list for follow-up',
