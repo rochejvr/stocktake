@@ -134,30 +134,6 @@ export async function POST(
   // parent is re-scanned.
   // Also: clear ALL count2_* columns at the start of recount aggregation so stale
   // data from previous runs doesn't stick around for items that are no longer in scope.
-  // For recount mode: snapshot existing count2_* so out-of-scope items preserve their
-  // values across rounds. Example: X1 was flagged in round 2 and recounted, user picked
-  // C2. Round 3 is opened for OTHER items — X1 is no longer in scope. Without this
-  // snapshot, batch upsert schema-padding would overwrite X1's count2 with null.
-  const existingC2 = new Map<string, { qty: number | null; direct: number | null; wip: number | null; ext: number | null }>();
-  if (isRecount) {
-    let offset = 0;
-    while (true) {
-      const { data: page } = await supabase
-        .from('count_results')
-        .select('part_number, store_code, count2_qty, count2_direct_qty, count2_wip_qty, count2_external_qty')
-        .eq('stock_take_id', id)
-        .range(offset, offset + 999);
-      if (!page || page.length === 0) break;
-      for (const r of page) {
-        existingC2.set(`${r.part_number}|${r.store_code}`, {
-          qty: r.count2_qty, direct: r.count2_direct_qty, wip: r.count2_wip_qty, ext: r.count2_external_qty,
-        });
-      }
-      if (page.length < 1000) break;
-      offset += 1000;
-    }
-  }
-
   let flaggedKeys: Set<string> | undefined;
   if (isRecount) {
     const { data: flaggedRows } = await supabase
@@ -292,7 +268,12 @@ export async function POST(
 
   // 4. Build or update count_results
   let flaggedCount = 0;
-  const upserts = [];
+  // Two upsert batches to avoid schema padding wiping existing count2 values for
+  // out-of-scope rows. upsertsWithC2: rows whose count2_* fields will be written
+  // (either new values or explicit null to clear). upsertsC1Only: count1 refresh
+  // for out-of-scope rows — no count2 columns, so existing count2 is preserved.
+  const upsertsWithC2: Array<Record<string, unknown>> = [];
+  const upsertsC1Only: Array<Record<string, unknown>> = [];
   const matchedKeys = new Set<string>();
   // Flag updates handled separately to avoid mixed-column batch upsert (NOT NULL violation)
   const flagUpdates: Array<{ part_number: string; store_code: string; reason: string }> = [];
@@ -310,28 +291,35 @@ export async function POST(
       const isInScope = flaggedKeys?.has(key) ?? false;
       const c1Total = c1Totals[key] ?? null;
       const isUncountedWithStock = c1Total === null && pastelQty > 0;
-      const prevC2 = existingC2.get(key);
+      const baseRow = {
+        stock_take_id: id,
+        part_number: inv.part_number,
+        description: inv.description,
+        store_code: inv.store_code,
+        tier,
+        unit_cost: inv.unit_cost,
+        pastel_qty: pastelQty,
+        count1_qty: c1Total,
+        count1_direct_qty: c1Direct[key] ?? null,
+        count1_wip_qty: c1Wip[key] ?? null,
+        count1_external_qty: c1External[key] ?? null,
+      };
 
-      if (c1Total !== null || isInScope || isUncountedWithStock) {
-        // In scope without activity: clear c2. Out of scope: preserve previous c2 values.
-        const row: Record<string, unknown> = {
-          stock_take_id: id,
-          part_number: inv.part_number,
-          description: inv.description,
-          store_code: inv.store_code,
-          tier,
-          unit_cost: inv.unit_cost,
-          pastel_qty: pastelQty,
-          count1_qty: c1Total,
-          count1_direct_qty: c1Direct[key] ?? null,
-          count1_wip_qty: c1Wip[key] ?? null,
-          count1_external_qty: c1External[key] ?? null,
-          count2_qty: isInScope ? null : (prevC2?.qty ?? null),
-          count2_direct_qty: isInScope ? null : (prevC2?.direct ?? null),
-          count2_wip_qty: isInScope ? null : (prevC2?.wip ?? null),
-          count2_external_qty: isInScope ? null : (prevC2?.ext ?? null),
-        };
-        upserts.push(row);
+      if (isInScope) {
+        // In scope without activity: clear count2 in the c2 batch
+        upsertsWithC2.push({
+          ...baseRow,
+          count2_qty: null,
+          count2_direct_qty: null,
+          count2_wip_qty: null,
+          count2_external_qty: null,
+        });
+        matchedKeys.add(key);
+      } else if (c1Total !== null || isUncountedWithStock) {
+        // Out of scope: only refresh count1; DO NOT include count2 columns so
+        // whatever count2 values exist in the DB are preserved (e.g., X1 kept
+        // its C2 preference from round 2 while round 3 focused on other items).
+        upsertsC1Only.push(baseRow);
         matchedKeys.add(key);
       }
       if (isUncountedWithStock) {
@@ -422,7 +410,7 @@ export async function POST(
       row.count1_wip_qty = c1Wip[key] ?? null;
       row.count1_external_qty = c1External[key] ?? null;
     }
-    upserts.push(row);
+    upsertsWithC2.push(row);
   }
 
   // Also add items that were scanned but NOT in Pastel inventory
@@ -451,21 +439,25 @@ export async function POST(
         extraRow.recount_flagged = true;
         extraRow.recount_reasons = ['zero_count_with_pastel_balance'];
       }
-      upserts.push(extraRow);
+      upsertsWithC2.push(extraRow);
       if (!isRecount) flaggedCount++;
     }
   }
 
-  // Upsert in batches
+  // Upsert in two batches: rows WITH count2_* fields and rows WITHOUT.
+  // Separate calls prevent PostgREST schema-padding from overwriting
+  // out-of-scope items' existing count2 values with null.
   const BATCH_SIZE = 200;
-  for (let i = 0; i < upserts.length; i += BATCH_SIZE) {
-    const batch = upserts.slice(i, i + BATCH_SIZE);
-    const { error: upsertErr } = await supabase
-      .from('count_results')
-      .upsert(batch, { onConflict: 'stock_take_id,part_number,store_code' });
+  for (const batch of [upsertsWithC2, upsertsC1Only]) {
+    for (let i = 0; i < batch.length; i += BATCH_SIZE) {
+      const chunk = batch.slice(i, i + BATCH_SIZE);
+      const { error: upsertErr } = await supabase
+        .from('count_results')
+        .upsert(chunk, { onConflict: 'stock_take_id,part_number,store_code' });
 
-    if (upsertErr) {
-      return NextResponse.json({ error: `Failed to save results: ${upsertErr.message}` }, { status: 500 });
+      if (upsertErr) {
+        return NextResponse.json({ error: `Failed to save results: ${upsertErr.message}` }, { status: 500 });
+      }
     }
   }
 
