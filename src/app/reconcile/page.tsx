@@ -870,7 +870,13 @@ function DeviationTile({ label, percent, primary, secondary }: {
   // Color tier: green ≤3%, amber ≤10%, red >10%
   const accent = percent <= 3 ? '#10b981' : percent <= 10 ? '#f59e0b' : '#ef4444';
   const tintBg = percent <= 3 ? 'rgba(16,185,129,0.08)' : percent <= 10 ? 'rgba(245,158,11,0.08)' : 'rgba(239,68,68,0.08)';
-  const dash = Math.max(0, Math.min(100, 100 - percent));
+  // Ring visual is scaled to a 0–20% deviation range so the critical
+  // "good zone" (0–5%) has meaningful resolution. Anything ≥20% pegs
+  // the ring at 0% fill (fully drained) — the exact % is still shown
+  // in the centre text and the color tier captures severity above 10%.
+  const RING_MAX = 20;
+  const clampedPct = Math.min(RING_MAX, Math.max(0, percent));
+  const dash = 100 - (clampedPct / RING_MAX) * 100;
   const gradId = `grad-${label.replace(/\s+/g, '-').toLowerCase()}`;
 
   return (
