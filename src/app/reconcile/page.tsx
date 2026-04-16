@@ -239,10 +239,13 @@ export default function ReconcilePage() {
       }
       totalPastel += r.pastel_qty;
       if (r.unit_cost) totalStockValuation += r.pastel_qty * Number(r.unit_cost);
-      // Pick active count: accepted first, then whichever count the per-row C1/C2 toggle is set to.
-      // count2Rows is pre-populated by shouldPreferCount2 on load, but follows user toggles thereafter.
+      // Active count follows the per-row C1/C2 toggle. accepted_qty is the value
+      // committed to Pastel export but does NOT lock the deviation preview —
+      // toggling C2 on an already-accepted row should still update the metric so
+      // supervisors can see "what if" scenarios while reviewing.
       const useC2 = count2Rows.has(r.id) && r.count2_qty !== null;
-      const counted = r.accepted_qty ?? (useC2 ? r.count2_qty : r.count1_qty);
+      const toggleQty = useC2 ? r.count2_qty : r.count1_qty;
+      const counted = toggleQty ?? r.accepted_qty;
       if (counted === null) continue;
       countedParts++;
       totalCounted += counted;
