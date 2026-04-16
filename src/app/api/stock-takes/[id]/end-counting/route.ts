@@ -60,11 +60,13 @@ export async function POST(
     bomOffset += BOM_PAGE;
   }
 
+  // Build bomLookup with lowercase keys for case-insensitive matching against scan_records
   const bomLookup: Record<string, Array<{ component_code: string; qty_per_wip: number }>> = {};
   if (bomMappings) {
     for (const bom of bomMappings) {
-      if (!bomLookup[bom.wip_code]) bomLookup[bom.wip_code] = [];
-      bomLookup[bom.wip_code].push({ component_code: bom.component_code, qty_per_wip: bom.qty_per_wip || 1 });
+      const key = bom.wip_code.toLowerCase();
+      if (!bomLookup[key]) bomLookup[key] = [];
+      bomLookup[key].push({ component_code: bom.component_code, qty_per_wip: bom.qty_per_wip || 1 });
     }
   }
 
@@ -88,8 +90,8 @@ export async function POST(
         const key = `${r.barcode}|${store}`;
         wip[key] = (wip[key] || 0) + qty;
         totals[key] = (totals[key] || 0) + qty;
-      } else if (bomLookup[r.barcode]) {
-        for (const comp of bomLookup[r.barcode]) {
+      } else if (bomLookup[r.barcode.toLowerCase()]) {
+        for (const comp of bomLookup[r.barcode.toLowerCase()]) {
           const compKey = `${comp.component_code}|${store}`;
           const compQty = qty * comp.qty_per_wip;
           wip[compKey] = (wip[compKey] || 0) + compQty;

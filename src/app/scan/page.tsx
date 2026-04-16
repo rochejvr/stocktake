@@ -374,39 +374,42 @@ export default function ScanPage() {
 
   // Unified scan handler — checks diagModeRef to decide behavior
   const handleScan = useCallback(async (code: string) => {
-    const barcode = code.trim().toUpperCase();
-    if (!barcode || !stockTake) return;
+    const input = code.trim();
+    if (!input || !stockTake) return;
 
     setBarcodeInput('');
     setError(null);
 
     try {
       const res = await fetch(
-        `/api/scan/lookup?barcode=${encodeURIComponent(barcode)}&stockTakeId=${stockTake.id}`
+        `/api/scan/lookup?barcode=${encodeURIComponent(input)}&stockTakeId=${stockTake.id}`
       );
       const data = await res.json();
 
       if (!data.valid) {
-        setError(`"${barcode}" is not a recognised Pastel part or BOM WIP code`);
+        setError(`"${input}" is not a recognised Pastel part or BOM WIP code`);
         vibrate();
         return;
       }
 
+      // Use canonical barcode returned by lookup API (DB casing)
+      const canonical: string = data.barcode || input;
+
       // Recount mode: warn if part is not flagged for recount in this store
       // Also triggers on empty set (load failure) — safe mode warns on every scan
       if (recountParts !== null) {
-        const key = `${barcode}|${storeCode}`;
+        const key = `${canonical}|${storeCode}`;
         if (!recountParts.has(key)) {
           const scanAnyway = confirm(
-            `"${barcode}" is not flagged for recount in ${storeCode === '001' ? 'Main Store' : 'Quarantine'}.\n\nScan anyway?`
+            `"${canonical}" is not flagged for recount in ${storeCode === '001' ? 'Main Store' : 'Quarantine'}.\n\nScan anyway?`
           );
           if (!scanAnyway) return;
         }
       }
 
       setPending({
-        barcode,
-        description: data.description || barcode,
+        barcode: canonical,
+        description: data.description || canonical,
       });
       setQty('');
     } catch {

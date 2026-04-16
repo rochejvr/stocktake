@@ -36,12 +36,12 @@ export async function GET(
 
   const sessionMap = new Map(sessions.map(s => [s.id, { countNumber: s.count_number, userName: s.user_name }]));
 
-  // 3. Get direct scan records for this barcode + store
+  // 3. Get direct scan records for this barcode + store (case-insensitive)
   const { data: directRecords } = await supabase
     .from('scan_records')
     .select('session_id, user_name, quantity, source, chained_from')
     .eq('stock_take_id', stock_take_id)
-    .eq('barcode', part_number)
+    .ilike('barcode', part_number)
     .eq('store_code', store_code);
 
   // 4. Get chain credit records — where this part was credited from a chain scan
@@ -49,32 +49,37 @@ export async function GET(
     .from('scan_records')
     .select('session_id, user_name, quantity, chained_from')
     .eq('stock_take_id', stock_take_id)
-    .eq('barcode', part_number)
+    .ilike('barcode', part_number)
     .eq('store_code', store_code)
     .not('chained_from', 'is', null);
 
   // 5. Get WIP contributions — find WIP codes that contain this part via BOM
+  // Case-insensitive component_code match (ilike without wildcards)
   const { data: bomMappings } = await supabase
     .from('bom_mappings')
     .select('wip_code, qty_per_wip')
-    .eq('component_code', part_number);
+    .ilike('component_code', part_number);
 
   let wipRecords: Array<{ session_id: string; user_name: string; quantity: number; barcode: string; qty_per_wip: number }> = [];
   if (bomMappings && bomMappings.length > 0) {
-    const wipCodes = bomMappings.map(b => b.wip_code);
+    // Include both canonical and uppercase variants to catch historical uppercase scan_records
+    const wipCodeVariants = [...new Set(
+      bomMappings.flatMap(b => [b.wip_code, b.wip_code.toUpperCase()])
+    )];
     const { data: wipScans } = await supabase
       .from('scan_records')
       .select('session_id, user_name, quantity, barcode')
       .eq('stock_take_id', stock_take_id)
       .eq('store_code', store_code)
-      .in('barcode', wipCodes)
+      .in('barcode', wipCodeVariants)
       .is('chained_from', null);
 
     if (wipScans) {
-      const bomMap = new Map(bomMappings.map(b => [b.wip_code, b.qty_per_wip || 1]));
+      // Lowercase keys for case-insensitive lookup against scan records
+      const bomMap = new Map(bomMappings.map(b => [b.wip_code.toLowerCase(), b.qty_per_wip || 1]));
       wipRecords = wipScans.map(r => ({
         ...r,
-        qty_per_wip: bomMap.get(r.barcode) || 1,
+        qty_per_wip: bomMap.get(r.barcode.toLowerCase()) || 1,
       }));
     }
   }

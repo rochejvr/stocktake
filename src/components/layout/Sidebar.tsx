@@ -134,7 +134,7 @@ export function Sidebar() {
           className="text-white/20 text-[10px] overflow-hidden whitespace-nowrap hover:text-white/40 transition-colors cursor-pointer"
           style={{ opacity: expanded ? 1 : 0, transition: 'opacity 150ms' }}
         >
-          v0.3.0 · Apr 2026
+          v0.3.1 · Apr 2026
         </button>
       </div>
 
@@ -145,13 +145,19 @@ export function Sidebar() {
             <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--card-border)' }}>
               <div>
                 <h3 className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>What&apos;s New</h3>
-                <p className="text-[11px] text-[var(--muted)]">v0.3.0 — April 2026</p>
+                <p className="text-[11px] text-[var(--muted)]">v0.3.1 — April 2026</p>
               </div>
               <button onClick={() => setShowChangelog(false)} className="text-[var(--muted)] hover:text-[var(--foreground)] p-1">
                 <X size={18} />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 text-xs space-y-4">
+              <ChangelogSection title="v0.3.1 — Case-Sensitive Barcode Fix" items={[
+                'Barcode lookups are now case-insensitive — mixed-case WIPs like WIP460032(Xavant) now scan correctly',
+                'Scan records store canonical DB casing, not uppercased input',
+                'End-counting aggregates across any case variation (backward-compatible with existing scans)',
+                'Per-counter breakdown handles mixed-case WIPs correctly',
+              ]} />
               <ChangelogSection title="Dry Run Improvements" items={[
                 'Submit confirmation dialog — prevents accidental session submission',
                 'Chained parts collapse under parent with "+N chain" badge',

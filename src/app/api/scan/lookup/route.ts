@@ -17,17 +17,18 @@ export async function GET(request: NextRequest) {
 
   // 1. Check pastel_inventory for current stock take
   if (stockTakeId) {
+    // Case-insensitive match; return canonical casing from DB
     const { data: pastelMatch } = await supabase
       .from('pastel_inventory')
       .select('part_number, description')
       .eq('stock_take_id', stockTakeId)
-      .eq('part_number', barcode)
+      .ilike('part_number', barcode)
       .limit(1)
       .maybeSingle();
 
     if (pastelMatch) {
       return NextResponse.json({
-        barcode,
+        barcode: pastelMatch.part_number,
         description: pastelMatch.description,
         found: true,
         valid: true,
@@ -40,13 +41,13 @@ export async function GET(request: NextRequest) {
   const { data: bomMatch } = await supabase
     .from('bom_mappings')
     .select('wip_code, notes')
-    .eq('wip_code', barcode)
+    .ilike('wip_code', barcode)
     .limit(1)
     .maybeSingle();
 
   if (bomMatch) {
     return NextResponse.json({
-      barcode,
+      barcode: bomMatch.wip_code,
       description: bomMatch.notes || `WIP: ${bomMatch.wip_code}`,
       found: true,
       valid: true,
