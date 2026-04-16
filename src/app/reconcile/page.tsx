@@ -783,9 +783,20 @@ export default function ReconcilePage() {
               </div>
             </div>
 
+            {/* Table meta (moved from below the table) */}
+            <div className="flex items-center justify-between text-xs text-[var(--muted)]">
+              <div>
+                Showing {sorted.length} of {results.length} parts
+                {hideZeroZero && zeroZeroCount > 0 && ` (${zeroZeroCount} zero items hidden)`}
+              </div>
+              {anyHasCount2 && (
+                <div className="text-[10px]">Click C1/C2 to switch active count per row</div>
+              )}
+            </div>
+
             {/* Results table */}
             <div className="card overflow-hidden">
-              <div className="overflow-auto max-h-[calc(100vh-280px)]">
+              <div className="overflow-auto max-h-[calc(100vh-360px)]">
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 z-10 bg-white" style={{ boxShadow: '0 1px 0 var(--card-border)' }}>
                     {/* Two-row header: main row + sub-columns for Count */}
@@ -845,16 +856,6 @@ export default function ReconcilePage() {
                 <div className="p-8 text-center text-sm text-[var(--muted)]">
                   No results match your filters
                 </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between text-xs text-[var(--muted)]">
-              <div>
-                Showing {sorted.length} of {results.length} parts
-                {hideZeroZero && zeroZeroCount > 0 && ` (${zeroZeroCount} zero items hidden)`}
-              </div>
-              {anyHasCount2 && (
-                <div className="text-[10px]">Click C1/C2 to switch active count per row</div>
               )}
             </div>
           </div>
