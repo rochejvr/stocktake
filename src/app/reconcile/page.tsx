@@ -237,8 +237,10 @@ export default function ReconcilePage() {
         continue; // excluded from BOTH numerator and denominator
       }
       totalPastel += r.pastel_qty;
-      // Pick active count: accepted first, then c2 if recount variance is smaller, else c1
-      const counted = r.accepted_qty ?? (shouldPreferCount2(r) ? r.count2_qty : r.count1_qty);
+      // Pick active count: accepted first, then whichever count the per-row C1/C2 toggle is set to.
+      // count2Rows is pre-populated by shouldPreferCount2 on load, but follows user toggles thereafter.
+      const useC2 = count2Rows.has(r.id) && r.count2_qty !== null;
+      const counted = r.accepted_qty ?? (useC2 ? r.count2_qty : r.count1_qty);
       if (counted === null) continue;
       countedParts++;
       totalCounted += counted;
@@ -249,7 +251,7 @@ export default function ReconcilePage() {
     // Deviation as % of expected stock (Pastel inventory) — stable between counts
     const overallPct = totalPastel > 0 ? (totalAbsVariance / totalPastel) * 100 : 0;
     return { totalCounted, totalPastel, totalAbsVariance, totalValueVariance, overallPct, countedParts, excludedFromCalc };
-  }, [results, excludedIds]);
+  }, [results, excludedIds, count2Rows]);
 
   // Accept deviation — uses the active count qty
   const handleAcceptDeviation = async (id: string, acceptedQty: number) => {
@@ -818,7 +820,7 @@ export default function ReconcilePage() {
                       <SortHeader label="%" field="variance_pct" current={sortField} dir={sortDir} onSort={toggleSort} align="right" rowSpan={2} />
                       <th className="text-center px-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider bg-white" rowSpan={2}>Status</th>
                       {isReviewable && (
-                        <th className="text-center px-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider bg-white" rowSpan={2}>Actions</th>
+                        <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider bg-white" rowSpan={2}>Actions</th>
                       )}
                     </tr>
                     <tr className="border-b bg-white" style={{ borderColor: 'var(--card-border)' }}>
@@ -1066,8 +1068,8 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
         </td>
         {/* Actions */}
         {isReviewable && (
-          <td className="px-2 py-2 text-center" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-center gap-1">
+          <td className="px-2 py-2 text-right" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-end gap-1">
               {r.deviation_accepted === true ? (
                 <button
                   onClick={() => onUnaccept()}
