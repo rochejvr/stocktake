@@ -50,8 +50,17 @@ export default function ReconcilePage() {
         // Always fetch all results — filter client-side for instant tab switching
         const crRes = await fetch(`/api/count-results?stockTakeId=${st.id}&filter=all`);
         const crData = await crRes.json();
-        const arr = Array.isArray(crData) ? crData : [];
+        const arr: CountResult[] = Array.isArray(crData) ? crData : [];
         setResults(arr);
+        // Pre-populate C1/C2 toggle: default to C2 when recount found a lower value
+        // (more accurate physical count). User can still toggle manually per row.
+        const autoC2 = new Set<string>();
+        for (const r of arr) {
+          if (r.count2_qty !== null && r.count1_qty !== null && r.count2_qty < r.count1_qty) {
+            autoC2.add(r.id);
+          }
+        }
+        setCount2Rows(autoC2);
       }
     } catch { /* ignore */ }
     finally { setLoading(false); }
@@ -62,9 +71,14 @@ export default function ReconcilePage() {
   // Auto-accept zero-variance items on data load (only in reviewing status)
   useEffect(() => {
     if (stockTake?.status !== 'reviewing') return;
+    const pickActive = (r: CountResult) => {
+      // c2 only if recount found a lower value (more accurate physical count); else c1
+      const useC2 = r.count2_qty !== null && r.count1_qty !== null && r.count2_qty < r.count1_qty;
+      return useC2 ? r.count2_qty : r.count1_qty;
+    };
     const toAutoAccept = results.filter(r => {
       if (r.deviation_accepted === true) return false;
-      const counted = r.count2_qty ?? r.count1_qty;
+      const counted = pickActive(r);
       if (counted === null) return false;
       const varQty = counted - r.pastel_qty;
       const varPct = r.pastel_qty !== 0 ? Math.abs((varQty / r.pastel_qty) * 100) : (counted !== 0 ? 100 : 0);
@@ -81,7 +95,7 @@ export default function ReconcilePage() {
     // Fire-and-forget batch auto-accept
     (async () => {
       for (const item of toAutoAccept) {
-        const activeQty = item.count2_qty ?? item.count1_qty!;
+        const activeQty = pickActive(item)!;
         try {
           const res = await fetch(`/api/count-results/${item.id}`, {
             method: 'PATCH',
@@ -185,21 +199,23 @@ export default function ReconcilePage() {
   // Overall deviation: sum(abs(variance)) / sum(counted qty) across all counted items
   const deviationStats = useMemo(() => {
     let totalCounted = 0;
-    let totalPastel = 0;
+    let totalPastel = 0;        // stable baseline — all inventory, regardless of count state
     let totalAbsVariance = 0;
     let totalValueVariance = 0;
     let countedParts = 0;
     for (const r of results) {
-      const counted = r.count2_qty ?? r.count1_qty;
+      totalPastel += r.pastel_qty;
+      // Pick active count: accepted first, then c2 if recount found less, else c1
+      const useC2 = r.count2_qty !== null && r.count1_qty !== null && r.count2_qty < r.count1_qty;
+      const counted = r.accepted_qty ?? (useC2 ? r.count2_qty : r.count1_qty);
       if (counted === null) continue;
       countedParts++;
       totalCounted += counted;
-      totalPastel += r.pastel_qty;
       const variance = counted - r.pastel_qty;
       totalAbsVariance += Math.abs(variance);
       if (r.unit_cost) totalValueVariance += Math.abs(variance) * Number(r.unit_cost);
     }
-    // Deviation as % of expected stock (Pastel) — standard inventory accuracy metric
+    // Deviation as % of expected stock (Pastel inventory) — stable between counts
     const overallPct = totalPastel > 0 ? (totalAbsVariance / totalPastel) * 100 : 0;
     return { totalCounted, totalPastel, totalAbsVariance, totalValueVariance, overallPct, countedParts };
   }, [results]);
@@ -627,7 +643,7 @@ export default function ReconcilePage() {
                   <div>
                     <div className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>Overall Deviation</div>
                     <div className="text-[11px] text-[var(--muted)] mt-0.5">
-                      {deviationStats.totalAbsVariance.toLocaleString()} variance / {deviationStats.totalPastel.toLocaleString()} expected
+                      {deviationStats.totalAbsVariance.toLocaleString()} variance / {deviationStats.totalPastel.toLocaleString()} Pastel inventory
                     </div>
                     <div className="text-[11px] text-[var(--muted)]">
                       {deviationStats.countedParts.toLocaleString()} of {totalParts.toLocaleString()} parts counted

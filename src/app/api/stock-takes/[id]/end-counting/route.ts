@@ -71,36 +71,89 @@ export async function POST(
   }
 
   // Helper: aggregate scan records into direct/wip/external/totals maps
+  // allowedKeys: when provided (count 2 mode), only accumulate contributions to keys
+  // in this set. This prevents WIP-scan explosions in count 2 from overriding count1
+  // for XM components that weren't flagged for recount.
   function aggregateRecords(
     records: Array<{ barcode: string; quantity: number; store_code: string; chained_from: string | null; source: string }>,
     direct: Record<string, number>,
     wip: Record<string, number>,
     external: Record<string, number>,
     totals: Record<string, number>,
+    allowedKeys?: Set<string>,
   ) {
+    const isAllowed = (key: string) => !allowedKeys || allowedKeys.has(key);
+
     for (const r of records) {
       const store = r.store_code || '001';
       const qty = r.quantity;
 
       if (r.source === 'external') {
         const key = `${r.barcode}|${store}`;
+        if (!isAllowed(key)) continue;
         external[key] = (external[key] || 0) + qty;
         totals[key] = (totals[key] || 0) + qty;
       } else if (r.chained_from) {
         const key = `${r.barcode}|${store}`;
+        if (!isAllowed(key)) continue;
         wip[key] = (wip[key] || 0) + qty;
         totals[key] = (totals[key] || 0) + qty;
       } else if (bomLookup[r.barcode.toLowerCase()]) {
         for (const comp of bomLookup[r.barcode.toLowerCase()]) {
           const compKey = `${comp.component_code}|${store}`;
+          if (!isAllowed(compKey)) continue;
           const compQty = qty * comp.qty_per_wip;
           wip[compKey] = (wip[compKey] || 0) + compQty;
           totals[compKey] = (totals[compKey] || 0) + compQty;
         }
       } else {
         const key = `${r.barcode}|${store}`;
+        if (!isAllowed(key)) continue;
         direct[key] = (direct[key] || 0) + qty;
         totals[key] = (totals[key] || 0) + qty;
+      }
+    }
+  }
+
+  // For recount mode: fetch set of items flagged in count 1, expanded to include
+  // chain descendants. Count 2 aggregation is filtered to ONLY update these items —
+  // prevents WIP-scan explosions in count 2 from overwriting count1 for unflagged XMs,
+  // while still allowing chain children of flagged parents to be updated when the
+  // parent is re-scanned.
+  let flaggedKeys: Set<string> | undefined;
+  if (isRecount) {
+    const { data: flaggedRows } = await supabase
+      .from('count_results')
+      .select('part_number, store_code')
+      .eq('stock_take_id', id)
+      .eq('recount_flagged', true);
+    const rows = flaggedRows || [];
+    flaggedKeys = new Set(rows.map(r => `${r.part_number}|${r.store_code}`));
+
+    // Expand to include chain descendants of any flagged parent (same store).
+    // When parent P is flagged and re-scanned in count 2, its chain credits for
+    // children C1/C2 must be in scope — otherwise the recount is incomplete.
+    const flaggedParts = [...new Set(rows.map(r => r.part_number))];
+    if (flaggedParts.length > 0) {
+      const { data: chains } = await supabase
+        .from('component_chains')
+        .select('scanned_code, also_credit_code')
+        .in('scanned_code', flaggedParts);
+      if (chains) {
+        // Map parent → stores where it's flagged
+        const parentStores = new Map<string, Set<string>>();
+        for (const r of rows) {
+          if (!parentStores.has(r.part_number)) parentStores.set(r.part_number, new Set());
+          parentStores.get(r.part_number)!.add(r.store_code);
+        }
+        for (const ch of chains) {
+          const stores = parentStores.get(ch.scanned_code);
+          if (stores) {
+            for (const store of stores) {
+              flaggedKeys.add(`${ch.also_credit_code}|${store}`);
+            }
+          }
+        }
       }
     }
   }
@@ -116,7 +169,8 @@ export async function POST(
       .from('scan_records')
       .select('barcode, quantity, store_code, chained_from, source')
       .in('session_id', sessionIds);
-    aggregateRecords(records || [], scanDirect, scanWip, scanExternal, scanTotals);
+    // In recount mode, filter contributions to flagged items only
+    aggregateRecords(records || [], scanDirect, scanWip, scanExternal, scanTotals, flaggedKeys);
   }
 
   // For recounts: also re-aggregate count1 from count_number=1 sessions

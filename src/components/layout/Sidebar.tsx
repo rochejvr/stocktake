@@ -134,7 +134,7 @@ export function Sidebar() {
           className="text-white/20 text-[10px] overflow-hidden whitespace-nowrap hover:text-white/40 transition-colors cursor-pointer"
           style={{ opacity: expanded ? 1 : 0, transition: 'opacity 150ms' }}
         >
-          v0.3.4 · Apr 2026
+          v0.3.5 · Apr 2026
         </button>
       </div>
 
@@ -145,13 +145,20 @@ export function Sidebar() {
             <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--card-border)' }}>
               <div>
                 <h3 className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>What&apos;s New</h3>
-                <p className="text-[11px] text-[var(--muted)]">v0.3.4 — April 2026</p>
+                <p className="text-[11px] text-[var(--muted)]">v0.3.5 — April 2026</p>
               </div>
               <button onClick={() => setShowChangelog(false)} className="text-[var(--muted)] hover:text-[var(--foreground)] p-1">
                 <X size={18} />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 text-xs space-y-4">
+              <ChangelogSection title="v0.3.5 — Count 2 Scoping + C2 Defaults" items={[
+                'Count 2 aggregation now only updates items flagged for recount + their chain descendants',
+                'Prevents WIP-scan explosions in count 2 from contaminating unflagged XM components',
+                'Deviation denominator now total Pastel inventory (stable between counts)',
+                'Per-row C1/C2 toggle auto-defaults to C2 when recount found a lower value',
+                'Auto-accept uses the same C2-if-lower rule for consistency',
+              ]} />
               <ChangelogSection title="v0.3.4 — Deviation Calculation Fix" items={[
                 'Overall deviation now divides by expected stock (Pastel), not by counted total',
                 'Standard inventory accuracy metric — values now stay within 0–100% in normal cases',
