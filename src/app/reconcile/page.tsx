@@ -185,6 +185,7 @@ export default function ReconcilePage() {
   // Overall deviation: sum(abs(variance)) / sum(counted qty) across all counted items
   const deviationStats = useMemo(() => {
     let totalCounted = 0;
+    let totalPastel = 0;
     let totalAbsVariance = 0;
     let totalValueVariance = 0;
     let countedParts = 0;
@@ -193,12 +194,14 @@ export default function ReconcilePage() {
       if (counted === null) continue;
       countedParts++;
       totalCounted += counted;
+      totalPastel += r.pastel_qty;
       const variance = counted - r.pastel_qty;
       totalAbsVariance += Math.abs(variance);
       if (r.unit_cost) totalValueVariance += Math.abs(variance) * Number(r.unit_cost);
     }
-    const overallPct = totalCounted > 0 ? (totalAbsVariance / totalCounted) * 100 : 0;
-    return { totalCounted, totalAbsVariance, totalValueVariance, overallPct, countedParts };
+    // Deviation as % of expected stock (Pastel) — standard inventory accuracy metric
+    const overallPct = totalPastel > 0 ? (totalAbsVariance / totalPastel) * 100 : 0;
+    return { totalCounted, totalPastel, totalAbsVariance, totalValueVariance, overallPct, countedParts };
   }, [results]);
 
   // Accept deviation — uses the active count qty
@@ -624,7 +627,7 @@ export default function ReconcilePage() {
                   <div>
                     <div className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>Overall Deviation</div>
                     <div className="text-[11px] text-[var(--muted)] mt-0.5">
-                      {deviationStats.totalAbsVariance.toLocaleString()} variance / {deviationStats.totalCounted.toLocaleString()} counted
+                      {deviationStats.totalAbsVariance.toLocaleString()} variance / {deviationStats.totalPastel.toLocaleString()} expected
                     </div>
                     <div className="text-[11px] text-[var(--muted)]">
                       {deviationStats.countedParts.toLocaleString()} of {totalParts.toLocaleString()} parts counted
