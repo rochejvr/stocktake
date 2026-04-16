@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   AlertTriangle, Check, ChevronDown, ChevronUp, Filter,
   Search, ArrowUpDown, CheckCircle, XCircle, Flag, Printer, ListChecks,
-  EyeOff, Eye, RotateCcw,
+  EyeOff, Eye, RotateCcw, Calculator,
 } from 'lucide-react';
 import type { StockTake, CountResult } from '@/types';
 import { STORE_LABELS, TIER_LABELS, RECOUNT_THRESHOLDS, RECOUNT_ZAR_THRESHOLD } from '@/lib/constants';
@@ -23,6 +23,24 @@ function shouldPreferCount2(r: { count1_qty: number | null; count2_qty: number |
   const c1Var = Math.abs(r.count1_qty - r.pastel_qty);
   const c2Var = Math.abs(r.count2_qty - r.pastel_qty);
   return c2Var < c1Var;
+}
+
+// Round to 1 decimal; drop the decimal if the value is a whole number.
+function formatNum(n: number): string {
+  const rounded = Math.round(n * 10) / 10;
+  return Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(1);
+}
+
+const EXCLUDED_DEVIATION_KEY = (stockTakeId: string) => `deviation-excluded-${stockTakeId}`;
+function loadExcludedIds(stockTakeId: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(EXCLUDED_DEVIATION_KEY(stockTakeId));
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw) as string[]);
+  } catch { return new Set(); }
+}
+function saveExcludedIds(stockTakeId: string, ids: Set<string>) {
+  try { localStorage.setItem(EXCLUDED_DEVIATION_KEY(stockTakeId), JSON.stringify([...ids])); } catch { /* noop */ }
 }
 
 export default function ReconcilePage() {
@@ -47,6 +65,8 @@ export default function ReconcilePage() {
   // Per-counter breakdown for expanded rows (fetched on-demand)
   const [breakdowns, setBreakdowns] = useState<Record<string, CounterBreakdown>>({});
   const [loadingBreakdown, setLoadingBreakdown] = useState<string | null>(null);
+  // IDs excluded from deviation calc (user can toggle per row; does NOT affect export)
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
 
   const fetchData = useCallback(async () => {
     try {
@@ -56,6 +76,8 @@ export default function ReconcilePage() {
       setStockTake(st);
 
       if (st) {
+        // Load excluded IDs for this stock take from localStorage
+        setExcludedIds(loadExcludedIds(st.id));
         // Always fetch all results — filter client-side for instant tab switching
         const crRes = await fetch(`/api/count-results?stockTakeId=${st.id}&filter=all`);
         const crData = await crRes.json();
@@ -208,7 +230,12 @@ export default function ReconcilePage() {
     let totalAbsVariance = 0;
     let totalValueVariance = 0;
     let countedParts = 0;
+    let excludedFromCalc = 0;
     for (const r of results) {
+      if (excludedIds.has(r.id)) {
+        excludedFromCalc++;
+        continue; // excluded from BOTH numerator and denominator
+      }
       totalPastel += r.pastel_qty;
       // Pick active count: accepted first, then c2 if recount variance is smaller, else c1
       const counted = r.accepted_qty ?? (shouldPreferCount2(r) ? r.count2_qty : r.count1_qty);
@@ -221,8 +248,8 @@ export default function ReconcilePage() {
     }
     // Deviation as % of expected stock (Pastel inventory) — stable between counts
     const overallPct = totalPastel > 0 ? (totalAbsVariance / totalPastel) * 100 : 0;
-    return { totalCounted, totalPastel, totalAbsVariance, totalValueVariance, overallPct, countedParts };
-  }, [results]);
+    return { totalCounted, totalPastel, totalAbsVariance, totalValueVariance, overallPct, countedParts, excludedFromCalc };
+  }, [results, excludedIds]);
 
   // Accept deviation — uses the active count qty
   const handleAcceptDeviation = async (id: string, acceptedQty: number) => {
@@ -289,6 +316,17 @@ export default function ReconcilePage() {
     setCount2Rows(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  // Toggle per-row exclusion from deviation calc (persisted in localStorage)
+  const handleToggleExclude = (id: string) => {
+    if (!stockTake) return;
+    setExcludedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      saveExcludedIds(stockTake.id, next);
       return next;
     });
   };
@@ -647,7 +685,8 @@ export default function ReconcilePage() {
                   <div>
                     <div className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>Overall Deviation</div>
                     <div className="text-[11px] text-[var(--muted)] mt-0.5">
-                      {deviationStats.totalAbsVariance.toLocaleString()} variance / {deviationStats.totalPastel.toLocaleString()} Pastel inventory
+                      {formatNum(deviationStats.totalAbsVariance)} variance / {formatNum(deviationStats.totalPastel)} Pastel inventory
+                      {deviationStats.excludedFromCalc > 0 && <span> · {deviationStats.excludedFromCalc} excluded</span>}
                     </div>
                     <div className="text-[11px] text-[var(--muted)]">
                       {deviationStats.countedParts.toLocaleString()} of {totalParts.toLocaleString()} parts counted
@@ -748,33 +787,34 @@ export default function ReconcilePage() {
             <div className="card overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead>
+                  <thead className="sticky top-0 z-10 bg-white" style={{ boxShadow: '0 1px 0 var(--card-border)' }}>
                     {/* Two-row header: main row + sub-columns for Count */}
-                    <tr className="border-b" style={{ borderColor: 'var(--card-border)' }}>
-                      <th className="text-center px-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider w-6" rowSpan={2} title="Store">St</th>
+                    <tr className="border-b bg-white" style={{ borderColor: 'var(--card-border)' }}>
+                      <th className="text-center px-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider w-6 bg-white" rowSpan={2} title="Store">St</th>
                       <SortHeader label="Tier" field="tier" current={sortField} dir={sortDir} onSort={toggleSort} rowSpan={2} />
                       <SortHeader label="Part Number" field="part_number" current={sortField} dir={sortDir} onSort={toggleSort} rowSpan={2} />
-                      <th className="text-left px-3 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider" rowSpan={2}>Description</th>
+                      <th className="text-left px-3 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider bg-white" rowSpan={2}>Description</th>
                       <SortHeader label="Pastel" field="pastel_qty" current={sortField} dir={sortDir} onSort={toggleSort} align="right" rowSpan={2} />
                       {anyHasCount2 && (
-                        <th className="text-center px-1 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider w-8" rowSpan={2}></th>
+                        <th className="text-center px-1 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider w-8 bg-white" rowSpan={2}></th>
                       )}
-                      <th className="text-center px-1 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider" colSpan={3}
+                      <th className="text-center px-1 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider bg-white" colSpan={4}
                         style={{ borderBottom: 'none' }}
                       >
                         Count
                       </th>
                       <SortHeader label="Var" field="variance_qty" current={sortField} dir={sortDir} onSort={toggleSort} align="right" rowSpan={2} />
                       <SortHeader label="%" field="variance_pct" current={sortField} dir={sortDir} onSort={toggleSort} align="right" rowSpan={2} />
-                      <th className="text-center px-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider" rowSpan={2}>Status</th>
+                      <th className="text-center px-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider bg-white" rowSpan={2}>Status</th>
                       {isReviewable && (
-                        <th className="text-center px-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider" rowSpan={2}>Actions</th>
+                        <th className="text-center px-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider bg-white" rowSpan={2}>Actions</th>
                       )}
                     </tr>
-                    <tr className="border-b" style={{ borderColor: 'var(--card-border)' }}>
-                      <th className="text-right px-2 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wider">Part</th>
-                      <th className="text-right px-2 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wider">WIP</th>
-                      <th className="text-right px-2 py-1 text-[9px] font-semibold text-amber-600 uppercase tracking-wider">Ext</th>
+                    <tr className="border-b bg-white" style={{ borderColor: 'var(--card-border)' }}>
+                      <th className="text-right px-2 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wider bg-white">Part</th>
+                      <th className="text-right px-2 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wider bg-white">WIP</th>
+                      <th className="text-right px-2 py-1 text-[9px] font-semibold text-amber-600 uppercase tracking-wider bg-white">Ext</th>
+                      <th className="text-right px-2 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wider bg-white">Total</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -789,11 +829,13 @@ export default function ReconcilePage() {
                         accepting={accepting === r.id}
                         breakdown={breakdowns[r.id]}
                         loadingBreakdown={loadingBreakdown === r.id}
+                        excluded={excludedIds.has(r.id)}
                         onToggleExpand={() => setExpandedId(expandedId === r.id ? null : r.id)}
                         onAccept={(qty) => handleAcceptDeviation(r.id, qty)}
                         onUnaccept={() => handleUnaccept(r.id)}
                         onToggleFlag={() => handleToggleFlag(r.id, r.recount_flagged)}
                         onToggleCount={() => handleToggleCountVersion(r.id)}
+                        onToggleExclude={() => handleToggleExclude(r.id)}
                       />
                     ))}
                   </tbody>
@@ -895,12 +937,14 @@ const REASON_LABELS: Record<string, string> = {
   manual_supervisor_flag: 'Manually flagged by supervisor',
 };
 
-function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expanded, accepting, breakdown, loadingBreakdown, onToggleExpand, onAccept, onUnaccept, onToggleFlag, onToggleCount }: {
+function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expanded, accepting, breakdown, loadingBreakdown, excluded, onToggleExpand, onAccept, onUnaccept, onToggleFlag, onToggleCount, onToggleExclude }: {
   result: CountResult; anyHasCount2: boolean; showingCount2: boolean; isReviewable: boolean;
   expanded: boolean; accepting: boolean;
   breakdown?: CounterBreakdown; loadingBreakdown?: boolean;
+  excluded?: boolean;
   onToggleExpand: () => void; onAccept: (qty: number) => void; onUnaccept: () => void;
   onToggleFlag: () => void; onToggleCount: () => void;
+  onToggleExclude: () => void;
 }) {
   // Active count: use C2 if toggled and available, else C1
   const useCount2 = showingCount2 && r.count2_qty !== null;
@@ -928,14 +972,14 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
     : { label: 'M', bg: 'var(--primary-light)', color: 'var(--primary)', border: 'var(--primary)' };
 
   const hasCount2Data = r.count2_qty !== null;
-  // Column count: St + Tier + Part# + Desc + Pastel + [C1/C2] + Part + WIP + Ext + Var + % + Status + [Actions]
-  const colCount = (anyHasCount2 ? 1 : 0) + (isReviewable ? 12 : 11);
+  // Column count: St + Tier + Part# + Desc + Pastel + [C1/C2] + Part + WIP + Ext + Total + Var + % + Status + [Actions]
+  const colCount = (anyHasCount2 ? 1 : 0) + (isReviewable ? 13 : 12);
 
   return (
     <>
       <tr
         className="border-b cursor-pointer hover:bg-slate-50 transition-colors"
-        style={{ borderColor: 'var(--card-border)' }}
+        style={{ borderColor: 'var(--card-border)', opacity: excluded ? 0.45 : 1 }}
         onClick={onToggleExpand}
       >
         {/* Store badge */}
@@ -960,7 +1004,7 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
         </td>
         <td className="px-3 py-2 font-mono text-xs font-medium">{r.part_number}</td>
         <td className="px-3 py-2 text-xs text-[var(--muted)] max-w-[200px] truncate">{r.description}</td>
-        <td className="px-3 py-2 text-xs text-right font-mono">{r.pastel_qty}</td>
+        <td className="px-3 py-2 text-xs text-right font-mono">{formatNum(r.pastel_qty)}</td>
         {/* C1/C2 toggle — own column, only when any row has Count 2 */}
         {anyHasCount2 && (
           <td className="px-1 py-2 text-center" onClick={e => e.stopPropagation()}>
@@ -994,14 +1038,18 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
         </td>
         {/* Count: EXT sub-column (external supplier stock) */}
         <td className="px-2 py-2 text-xs text-right font-mono text-amber-600">
-          {activeExternal ? activeExternal : ''}
+          {activeExternal ? formatNum(activeExternal) : ''}
+        </td>
+        {/* Count: TOTAL sub-column (active count total) */}
+        <td className="px-2 py-2 text-xs text-right font-mono font-bold">
+          {activeQty !== null ? formatNum(activeQty) : <span className="text-[var(--muted-light)]">—</span>}
         </td>
         {/* Variance */}
         <td className="px-3 py-2 text-xs text-right font-mono font-bold" style={{ color: varianceColor }}>
-          {varQty !== null ? (varQty > 0 ? '+' : '') + varQty : '—'}
+          {varQty !== null ? (varQty > 0 ? '+' : '') + formatNum(varQty) : '—'}
         </td>
         <td className="px-2 py-2 text-xs text-right font-mono" style={{ color: varianceColor }}>
-          {varPct !== null ? absVarPct.toFixed(1) + '%' : '—'}
+          {varPct !== null ? formatNum(absVarPct) + '%' : '—'}
         </td>
         {/* Status */}
         <td className="px-2 py-2 text-center">
@@ -1048,6 +1096,17 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
                 title={r.recount_flagged ? 'Unflag for recount' : 'Flag for recount'}
               >
                 <Flag size={14} />
+              </button>
+              <button
+                onClick={onToggleExclude}
+                className={`p-1 rounded transition-colors ${
+                  excluded
+                    ? 'text-[var(--primary)] hover:text-[var(--primary)]'
+                    : 'text-[var(--muted-light)] hover:text-[var(--primary)]'
+                }`}
+                title={excluded ? 'Excluded from deviation calc — click to include' : 'Exclude from deviation calc (does not affect Pastel export)'}
+              >
+                <Calculator size={14} />
               </button>
             </div>
           </td>
