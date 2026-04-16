@@ -1064,7 +1064,7 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
         </td>
         <td className="px-3 py-2 font-mono text-xs font-medium">{r.part_number}</td>
         <td className="px-3 py-2 text-xs text-[var(--muted)] max-w-[200px] truncate">{r.description}</td>
-        <td className="px-3 py-2 text-xs text-right font-mono">{formatNum(r.pastel_qty)}</td>
+        <td className="px-3 py-2 text-xs text-right font-mono font-bold">{formatNum(r.pastel_qty)}</td>
         {/* C1/C2 toggle — own column, only when any row has Count 2 */}
         {anyHasCount2 && (
           <td className="px-1 py-2 text-center" onClick={e => e.stopPropagation()}>
@@ -1087,7 +1087,7 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
         {/* Count: Part sub-column (direct scans only) */}
         <td className="px-2 py-2 text-xs text-right font-mono">
           {activeDirect ? (
-            <span className="font-bold">{activeDirect}</span>
+            <span>{activeDirect}</span>
           ) : activeQty !== null ? (
             <span className="text-[var(--muted-light)]">—</span>
           ) : <span className="text-[var(--muted-light)]">—</span>}
