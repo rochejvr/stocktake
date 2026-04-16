@@ -134,18 +134,32 @@ export async function POST(
   // parent is re-scanned.
   // Also: clear ALL count2_* columns at the start of recount aggregation so stale
   // data from previous runs doesn't stick around for items that are no longer in scope.
+  // For recount mode: snapshot existing count2_* so out-of-scope items preserve their
+  // values across rounds. Example: X1 was flagged in round 2 and recounted, user picked
+  // C2. Round 3 is opened for OTHER items — X1 is no longer in scope. Without this
+  // snapshot, batch upsert schema-padding would overwrite X1's count2 with null.
+  const existingC2 = new Map<string, { qty: number | null; direct: number | null; wip: number | null; ext: number | null }>();
+  if (isRecount) {
+    let offset = 0;
+    while (true) {
+      const { data: page } = await supabase
+        .from('count_results')
+        .select('part_number, store_code, count2_qty, count2_direct_qty, count2_wip_qty, count2_external_qty')
+        .eq('stock_take_id', id)
+        .range(offset, offset + 999);
+      if (!page || page.length === 0) break;
+      for (const r of page) {
+        existingC2.set(`${r.part_number}|${r.store_code}`, {
+          qty: r.count2_qty, direct: r.count2_direct_qty, wip: r.count2_wip_qty, ext: r.count2_external_qty,
+        });
+      }
+      if (page.length < 1000) break;
+      offset += 1000;
+    }
+  }
+
   let flaggedKeys: Set<string> | undefined;
   if (isRecount) {
-    await supabase
-      .from('count_results')
-      .update({
-        count2_qty: null,
-        count2_direct_qty: null,
-        count2_wip_qty: null,
-        count2_external_qty: null,
-      })
-      .eq('stock_take_id', id);
-
     const { data: flaggedRows } = await supabase
       .from('count_results')
       .select('part_number, store_code')
@@ -292,12 +306,15 @@ export async function POST(
 
     // For recount: items not rescanned in count2 still need count1 refreshed
     if (isRecount && counted === null) {
-      // Only update count1 columns (don't touch count2)
+      // In scope = flagged OR directly scanned in count 2 (flaggedKeys is pre-expanded).
+      const isInScope = flaggedKeys?.has(key) ?? false;
       const c1Total = c1Totals[key] ?? null;
-      // If item was never counted but Pastel has stock, flag for recount (separate update)
       const isUncountedWithStock = c1Total === null && pastelQty > 0;
-      if (c1Total !== null) {
-        upserts.push({
+      const prevC2 = existingC2.get(key);
+
+      if (c1Total !== null || isInScope || isUncountedWithStock) {
+        // In scope without activity: clear c2. Out of scope: preserve previous c2 values.
+        const row: Record<string, unknown> = {
           stock_take_id: id,
           part_number: inv.part_number,
           description: inv.description,
@@ -309,7 +326,12 @@ export async function POST(
           count1_direct_qty: c1Direct[key] ?? null,
           count1_wip_qty: c1Wip[key] ?? null,
           count1_external_qty: c1External[key] ?? null,
-        });
+          count2_qty: isInScope ? null : (prevC2?.qty ?? null),
+          count2_direct_qty: isInScope ? null : (prevC2?.direct ?? null),
+          count2_wip_qty: isInScope ? null : (prevC2?.wip ?? null),
+          count2_external_qty: isInScope ? null : (prevC2?.ext ?? null),
+        };
+        upserts.push(row);
         matchedKeys.add(key);
       }
       if (isUncountedWithStock) {
