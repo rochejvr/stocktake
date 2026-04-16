@@ -895,11 +895,13 @@ function DeviationTile({ label, percent, primary, secondary }: {
             strokeLinecap="round"
           />
         </svg>
-        <div className="absolute inset-0 flex items-baseline justify-center" style={{ fontFamily: 'var(--font-display)' }}>
-          <span className="text-[22px] font-bold leading-none tabular-nums" style={{ color: accent, letterSpacing: '-0.02em' }}>
-            {percent.toFixed(1)}
-          </span>
-          <span className="text-[13px] font-semibold ml-0.5" style={{ color: accent, opacity: 0.75 }}>%</span>
+        <div className="absolute inset-0 flex items-center justify-center" style={{ fontFamily: 'var(--font-display)' }}>
+          <div className="inline-flex items-baseline">
+            <span className="text-[22px] font-bold leading-none tabular-nums" style={{ color: accent, letterSpacing: '-0.02em' }}>
+              {percent.toFixed(1)}
+            </span>
+            <span className="text-[13px] font-semibold ml-0.5" style={{ color: accent, opacity: 0.75 }}>%</span>
+          </div>
         </div>
       </div>
 
