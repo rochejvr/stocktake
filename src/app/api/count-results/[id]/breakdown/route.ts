@@ -27,14 +27,14 @@ export async function GET(
   // 2. Get all sessions for this stock take (to map session_id → count_number + user_name)
   const { data: sessions } = await supabase
     .from('scan_sessions')
-    .select('id, count_number, user_name')
+    .select('id, count_number, user_name, round_number')
     .eq('stock_take_id', stock_take_id);
 
   if (!sessions || sessions.length === 0) {
     return NextResponse.json({ count1: [], count2: [] });
   }
 
-  const sessionMap = new Map(sessions.map(s => [s.id, { countNumber: s.count_number, userName: s.user_name }]));
+  const sessionMap = new Map(sessions.map(s => [s.id, { countNumber: s.count_number, userName: s.user_name, roundNumber: s.round_number || 1 }]));
 
   // 3. Get direct scan records for this barcode + store (case-insensitive)
   const { data: directRecords } = await supabase
@@ -84,7 +84,27 @@ export async function GET(
     }
   }
 
-  // 6. Aggregate by count_number + user_name
+  // 6. Compute max round for THIS part across all count 2 contribution types.
+  // For count 2, only the latest round's data is used (per-item replacement).
+  let maxC2Round = 0;
+  const allC2SessionIds: string[] = [];
+  if (directRecords) {
+    for (const r of directRecords) {
+      const sess = sessionMap.get(r.session_id);
+      if (sess?.countNumber === 2) {
+        maxC2Round = Math.max(maxC2Round, sess.roundNumber);
+        allC2SessionIds.push(r.session_id);
+      }
+    }
+  }
+  for (const r of wipRecords) {
+    const sess = sessionMap.get(r.session_id);
+    if (sess?.countNumber === 2) {
+      maxC2Round = Math.max(maxC2Round, sess.roundNumber);
+    }
+  }
+
+  // 7. Aggregate by count_number + user_name
   type Entry = { counter: string; direct: number; wip: number; ext: number; total: number };
   const countMap: Record<1 | 2, Map<string, Entry>> = { 1: new Map(), 2: new Map() };
 
@@ -92,6 +112,8 @@ export async function GET(
     const sess = sessionMap.get(sessionId);
     if (!sess) return;
     const cn = sess.countNumber as 1 | 2;
+    // For count 2: only include records from the latest round (per-item replacement)
+    if (cn === 2 && maxC2Round > 0 && sess.roundNumber < maxC2Round) return;
     const map = countMap[cn];
     if (!map.has(userName)) {
       map.set(userName, { counter: userName, direct: 0, wip: 0, ext: 0, total: 0 });

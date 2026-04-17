@@ -28,33 +28,20 @@ export async function POST(
   const countNumber = isRecount ? 2 : 1;
   const countCol = isRecount ? 'count2_qty' : 'count1_qty';
 
-  // 2. Get scan sessions for this count number.
-  // For recounts: use sessions from the LATEST round that actually has sessions.
-  // This handles both workflows:
-  //  - Proper: counters submit + re-login after reopen → new sessions at current_round
-  //  - Resumed: counters log back into old sessions → sessions stay at their original round
-  // Either way, we pick the highest round_number that has scan activity.
-  let sessionQuery = supabase
+  // 2. Get ALL scan sessions for this count number (no round_number filter).
+  // Per-item round replacement is handled later: for each part, only the latest
+  // round where it was scanned is used. This handles sessions scattered across
+  // multiple rounds (due to counter resume/relogin dynamics).
+  const { data: sessions } = await supabase
     .from('scan_sessions')
-    .select('id')
+    .select('id, round_number')
     .eq('stock_take_id', id)
     .eq('count_number', countNumber);
 
-  if (isRecount) {
-    const { data: latestRoundRow } = await supabase
-      .from('scan_sessions')
-      .select('round_number')
-      .eq('stock_take_id', id)
-      .eq('count_number', countNumber)
-      .order('round_number', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const targetRound = latestRoundRow?.round_number ?? (st.current_round || 1);
-    sessionQuery = sessionQuery.eq('round_number', targetRound);
-  }
-
-  const { data: sessions } = await sessionQuery;
-  const sessionIds = (sessions || []).map(s => s.id);
+  const allSessions = sessions || [];
+  const sessionIds = allSessions.map(s => s.id);
+  // Map session_id → round_number (for per-item latest-round logic in count 2)
+  const sessionRoundMap = new Map(allSessions.map(s => [s.id, s.round_number || 1]));
 
   // Load ALL BOM mappings for WIP explosion (WIP → component parts)
   // Must paginate — Supabase defaults to 1000 row limit
@@ -82,19 +69,27 @@ export async function POST(
     }
   }
 
-  // Helper: aggregate scan records into direct/wip/external/totals maps
-  // allowedKeys: when provided (count 2 mode), only accumulate contributions to keys
-  // in this set. This prevents WIP-scan explosions in count 2 from overriding count1
-  // for XM components that weren't flagged for recount.
+  // Helper: aggregate scan records into direct/wip/external/totals maps.
+  // allowedKeys: filter (count 2 only) — skip contributions to keys not in this set.
+  // maxRoundMap: per-item latest-round logic (count 2 only) — skip records from older
+  // rounds when a newer round has scans for the same target part.
+  type ScanRec = { barcode: string; quantity: number; store_code: string; chained_from: string | null; source: string; session_id?: string };
   function aggregateRecords(
-    records: Array<{ barcode: string; quantity: number; store_code: string; chained_from: string | null; source: string }>,
+    records: ScanRec[],
     direct: Record<string, number>,
     wip: Record<string, number>,
     external: Record<string, number>,
     totals: Record<string, number>,
     allowedKeys?: Set<string>,
+    maxRoundMap?: Map<string, number>,
+    sessRoundMap?: Map<string, number>,
   ) {
     const isAllowed = (key: string) => !allowedKeys || allowedKeys.has(key);
+    const isLatestRound = (key: string, sessionId?: string) => {
+      if (!maxRoundMap || !sessRoundMap || !sessionId) return true;
+      const round = sessRoundMap.get(sessionId) ?? 1;
+      return round >= (maxRoundMap.get(key) ?? 0);
+    };
 
     for (const r of records) {
       const store = r.store_code || '001';
@@ -102,17 +97,20 @@ export async function POST(
 
       if (r.source === 'external') {
         const key = `${r.barcode}|${store}`;
+        if (!isLatestRound(key, r.session_id)) continue;
         if (!isAllowed(key)) continue;
         external[key] = (external[key] || 0) + qty;
         totals[key] = (totals[key] || 0) + qty;
       } else if (r.chained_from) {
         const key = `${r.barcode}|${store}`;
+        if (!isLatestRound(key, r.session_id)) continue;
         if (!isAllowed(key)) continue;
         wip[key] = (wip[key] || 0) + qty;
         totals[key] = (totals[key] || 0) + qty;
       } else if (bomLookup[r.barcode.toLowerCase()]) {
         for (const comp of bomLookup[r.barcode.toLowerCase()]) {
           const compKey = `${comp.component_code}|${store}`;
+          if (!isLatestRound(compKey, r.session_id)) continue;
           if (!isAllowed(compKey)) continue;
           const compQty = qty * comp.qty_per_wip;
           wip[compKey] = (wip[compKey] || 0) + compQty;
@@ -120,6 +118,7 @@ export async function POST(
         }
       } else {
         const key = `${r.barcode}|${store}`;
+        if (!isLatestRound(key, r.session_id)) continue;
         if (!isAllowed(key)) continue;
         direct[key] = (direct[key] || 0) + qty;
         totals[key] = (totals[key] || 0) + qty;
@@ -181,21 +180,16 @@ export async function POST(
   if (sessionIds.length > 0) {
     const { data: records } = await supabase
       .from('scan_records')
-      .select('barcode, quantity, store_code, chained_from, source')
+      .select('barcode, quantity, store_code, chained_from, source, session_id')
       .in('session_id', sessionIds);
-    const allRecords = records || [];
+    const allRecords = (records || []) as ScanRec[];
 
     // Expand flaggedKeys: any XM that was directly scanned (or imported as external)
     // in count 2 is an intentional recount action, regardless of its flag status.
-    // This prevents the filter from hiding legitimate counter-initiated scans while
-    // still blocking WIP-explosion collateral on truly untouched items.
     if (isRecount && flaggedKeys) {
       for (const r of allRecords) {
         const store = r.store_code || '001';
         const key = `${r.barcode}|${store}`;
-        // Skip WIP-code scans — those are handled by the filter (only credit flagged
-        // components via BOM explosion). Only direct scans / external / chain-credits
-        // on the XM itself indicate intent for this specific item.
         const isWipCode = !r.chained_from && !!bomLookup[r.barcode.toLowerCase()];
         if (!isWipCode) {
           flaggedKeys.add(key);
@@ -203,8 +197,31 @@ export async function POST(
       }
     }
 
-    // In recount mode, filter contributions to flagged items (incl. direct-scan expansion)
-    aggregateRecords(allRecords, scanDirect, scanWip, scanExternal, scanTotals, flaggedKeys);
+    // Pass 1: compute max round per target part (for count 2 per-item replacement).
+    // Each part uses ONLY the latest round where it was scanned from any source.
+    let maxRoundMap: Map<string, number> | undefined;
+    if (isRecount) {
+      maxRoundMap = new Map();
+      for (const r of allRecords) {
+        const store = r.store_code || '001';
+        const round = sessionRoundMap.get(r.session_id || '') ?? 1;
+        if (bomLookup[r.barcode.toLowerCase()]) {
+          // WIP scan: each BOM component is a target
+          for (const comp of bomLookup[r.barcode.toLowerCase()]) {
+            const compKey = `${comp.component_code}|${store}`;
+            maxRoundMap.set(compKey, Math.max(maxRoundMap.get(compKey) ?? 0, round));
+          }
+        } else {
+          // Direct/external/chain: barcode is the target
+          const key = `${r.barcode}|${store}`;
+          maxRoundMap.set(key, Math.max(maxRoundMap.get(key) ?? 0, round));
+        }
+      }
+    }
+
+    // Pass 2: aggregate only latest-round records per target, filtered by flaggedKeys
+    aggregateRecords(allRecords, scanDirect, scanWip, scanExternal, scanTotals,
+      flaggedKeys, maxRoundMap, isRecount ? sessionRoundMap : undefined);
   }
 
   // For recounts: also re-aggregate count1 from count_number=1 sessions
