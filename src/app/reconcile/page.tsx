@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronUp, Filter,
+  AlertTriangle, Check, ChevronDown, ChevronUp, Filter, X,
   Search, ArrowUpDown, CheckCircle, XCircle, Flag, Printer, ListChecks,
   EyeOff, Eye, RotateCcw, Calculator,
 } from 'lucide-react';
@@ -860,6 +860,16 @@ export default function ReconcilePage() {
           </div>
         )}
       </div>
+
+      {/* Slide-in detail panel */}
+      <DetailPanel
+        result={expandedId ? results.find(r => r.id === expandedId) ?? null : null}
+        breakdown={expandedId ? breakdowns[expandedId] : undefined}
+        loadingBreakdown={!!loadingBreakdown}
+        reaggregating={reaggregating}
+        onClose={() => setExpandedId(null)}
+        onReaggregate={handleReaggregate}
+      />
     </>
   );
 }
@@ -1058,7 +1068,7 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
   return (
     <>
       <tr
-        className="border-b cursor-pointer hover:bg-slate-50 transition-colors"
+        className={`border-b cursor-pointer transition-colors ${expanded ? 'bg-blue-50/60' : 'hover:bg-slate-50'}`}
         style={{ borderColor: 'var(--card-border)', opacity: excluded ? 0.45 : 1 }}
         onClick={onToggleExpand}
       >
@@ -1192,88 +1202,180 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
           </td>
         )}
       </tr>
-      {expanded && (() => {
-        // Sync detection: compare live breakdown totals with stored count_results
-        const bdC1Total = breakdown?.count1.reduce((s, c) => s + c.total, 0) ?? null;
-        const bdC2Total = breakdown?.count2.reduce((s, c) => s + c.total, 0) ?? null;
-        const c1OutOfSync = breakdown && bdC1Total !== null && r.count1_qty !== null && bdC1Total !== r.count1_qty;
-        const c2OutOfSync = breakdown && bdC2Total !== null && r.count2_qty !== null && bdC2Total !== r.count2_qty;
-        const outOfSync = c1OutOfSync || c2OutOfSync;
+      {/* Detail panel is now a slide-in at page level — no inline expansion */}
+    </>
+  );
+}
 
-        return (
-          <tr style={{ borderColor: 'var(--card-border)' }}>
-            <td colSpan={colCount} className="p-0">
-              <div className="bg-slate-50/80 border-t px-5 py-4 space-y-4" style={{ borderColor: 'var(--card-border)' }}>
+// ── Slide-in Detail Panel ────────────────────────────────────────────────────
 
-                {/* Sync warning banner */}
-                {outOfSync && (
-                  <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle size={14} className="flex-shrink-0 text-amber-500" />
-                      <span>
-                        Breakdown totals differ from stored values
-                        {c2OutOfSync && ` (C2: ${bdC2Total} live vs ${r.count2_qty} stored)`}
-                        {c1OutOfSync && ` (C1: ${bdC1Total} live vs ${r.count1_qty} stored)`}
-                      </span>
-                    </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onReaggregate(); }}
-                      disabled={reaggregating}
-                      className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-amber-600 text-white text-[11px] font-semibold hover:bg-amber-700 transition-colors disabled:opacity-50 flex-shrink-0"
-                    >
-                      <RotateCcw size={12} className={reaggregating ? 'animate-spin' : ''} />
-                      {reaggregating ? 'Re-aggregating...' : 'Re-aggregate'}
-                    </button>
+function DetailPanel({ result: r, breakdown, loadingBreakdown, reaggregating, onClose, onReaggregate }: {
+  result: CountResult | null;
+  breakdown?: CounterBreakdown;
+  loadingBreakdown: boolean;
+  reaggregating: boolean;
+  onClose: () => void;
+  onReaggregate: () => void;
+}) {
+  const isOpen = !!r;
+
+  // Close on Escape
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    if (isOpen) {
+      document.addEventListener('keydown', handleKey);
+      return () => document.removeEventListener('keydown', handleKey);
+    }
+  }, [isOpen, onClose]);
+
+  // Compute values when panel is open
+  const varQty = r && r.count2_qty !== null ? r.count2_qty - r.pastel_qty
+    : r && r.count1_qty !== null ? r.count1_qty - r.pastel_qty
+    : null;
+  const varianceColor = varQty == null ? 'var(--muted)' : varQty > 0 ? '#22c55e' : varQty < 0 ? 'var(--error)' : 'var(--muted)';
+
+  // Sync detection
+  const bdC1Total = breakdown?.count1.reduce((s, c) => s + c.total, 0) ?? null;
+  const bdC2Total = breakdown?.count2.reduce((s, c) => s + c.total, 0) ?? null;
+  const c1OutOfSync = breakdown && r && bdC1Total !== null && r.count1_qty !== null && bdC1Total !== r.count1_qty;
+  const c2OutOfSync = breakdown && r && bdC2Total !== null && r.count2_qty !== null && bdC2Total !== r.count2_qty;
+  const outOfSync = c1OutOfSync || c2OutOfSync;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className={`fixed inset-0 bg-black/10 z-40 transition-opacity duration-250 ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        onClick={onClose}
+      />
+      {/* Panel */}
+      <div
+        className={`fixed right-0 top-0 bottom-0 w-full max-w-lg bg-white border-l shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+        style={{ borderColor: 'var(--card-border)' }}
+      >
+        {r && (
+          <>
+            {/* Header */}
+            <div className="flex-shrink-0 border-b px-5 py-4" style={{ borderColor: 'var(--card-border)', background: '#f8fafc' }}>
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="font-mono text-base font-bold" style={{ fontFamily: 'var(--font-mono)' }}>{r.part_number}</div>
+                  <div className="text-xs text-[var(--muted)] mt-0.5">{r.description || 'No description'}</div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                      r.tier === 'A' ? 'bg-red-100 text-red-700'
+                      : r.tier === 'B' ? 'bg-amber-100 text-amber-700'
+                      : 'bg-slate-100 text-slate-600'
+                    }`}>{r.tier}</span>
+                    <span className="text-[10px] text-[var(--muted)]">{STORE_LABELS[r.store_code] || r.store_code}</span>
                   </div>
-                )}
-
-                {/* Top stats row */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {[
-                    { label: 'Tier', value: TIER_LABELS[r.tier] || r.tier },
-                    { label: 'Unit Cost', value: r.unit_cost !== null ? `R${Number(r.unit_cost).toFixed(2)}` : '—' },
-                    { label: 'Value Variance', value: r.unit_cost !== null && varQty !== null ? `R${(varQty * Number(r.unit_cost)).toFixed(2)}` : '—', color: varianceColor },
-                    { label: 'Accepted Qty', value: r.accepted_qty !== null ? r.accepted_qty : '—' },
-                  ].map(stat => (
-                    <div key={stat.label} className="bg-white rounded-lg border px-3 py-2" style={{ borderColor: 'var(--card-border)' }}>
-                      <div className="text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wide">{stat.label}</div>
-                      <div className="text-sm font-semibold mt-0.5" style={stat.color ? { color: stat.color } : undefined}>{stat.value}</div>
-                    </div>
-                  ))}
                 </div>
+                <button onClick={onClose} className="p-1 rounded-lg hover:bg-slate-200 transition-colors text-[var(--muted)]">
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
 
-                {/* Recount reasons + Accepted by — compact row */}
-                {(r.recount_reasons.length > 0 || r.accepted_by) && (
-                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
-                    {r.recount_reasons.length > 0 && (
-                      <div className="flex items-center gap-2">
-                        <span className="text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wide">Recount</span>
-                        <div className="flex flex-wrap gap-1">
-                          {r.recount_reasons.map(reason => (
-                            <span key={reason} className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">
-                              {REASON_LABELS[reason] || reason}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {r.accepted_by && (
-                      <div className="flex items-center gap-2 text-[var(--muted)]">
-                        <CheckCircle size={12} className="text-emerald-500 flex-shrink-0" />
-                        <span className="text-[11px]">
-                          {r.accepted_by}{r.accepted_at ? ` · ${new Date(r.accepted_at).toLocaleString()}` : ''}
-                        </span>
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+
+              {/* Sync warning */}
+              {outOfSync && (
+                <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle size={14} className="flex-shrink-0 text-amber-500" />
+                    <span>
+                      Totals out of sync
+                      {c2OutOfSync && ` (C2: ${bdC2Total} vs ${r.count2_qty})`}
+                      {c1OutOfSync && ` (C1: ${bdC1Total} vs ${r.count1_qty})`}
+                    </span>
+                  </div>
+                  <button
+                    onClick={onReaggregate}
+                    disabled={reaggregating}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-amber-600 text-white text-[11px] font-semibold hover:bg-amber-700 transition-colors disabled:opacity-50 flex-shrink-0"
+                  >
+                    <RotateCcw size={12} className={reaggregating ? 'animate-spin' : ''} />
+                    {reaggregating ? 'Syncing...' : 'Re-aggregate'}
+                  </button>
+                </div>
+              )}
+
+              {/* Stats grid */}
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: 'Pastel Qty', value: r.pastel_qty },
+                  { label: 'Unit Cost', value: r.unit_cost !== null ? `R${Number(r.unit_cost).toFixed(2)}` : '—' },
+                  { label: 'Value Variance', value: r.unit_cost !== null && varQty !== null ? `R${(varQty * Number(r.unit_cost)).toFixed(2)}` : '—', color: varianceColor },
+                  { label: 'Accepted Qty', value: r.accepted_qty !== null ? r.accepted_qty : '—' },
+                ].map(stat => (
+                  <div key={stat.label} className="rounded-lg border px-3 py-2" style={{ borderColor: 'var(--card-border)' }}>
+                    <div className="text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wide">{stat.label}</div>
+                    <div className="text-sm font-semibold mt-0.5" style={stat.color ? { color: stat.color } : undefined}>{stat.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Count History — compact summary */}
+              <div>
+                <div className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wide mb-2">Count History</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border px-3 py-2" style={{ borderColor: 'var(--card-border)', background: '#f8fafc' }}>
+                    <div className="text-[9px] font-bold text-[var(--muted)] uppercase">Count 1</div>
+                    <div className="font-mono text-lg font-bold mt-0.5">{r.count1_qty ?? '—'}</div>
+                    {(r.count1_direct_qty || r.count1_wip_qty || r.count1_external_qty) && (
+                      <div className="text-[10px] text-[var(--muted)] mt-0.5">
+                        {r.count1_direct_qty ?? 0} part{r.count1_wip_qty ? ` + ${r.count1_wip_qty} wip` : ''}{r.count1_external_qty ? ` + ${r.count1_external_qty} ext` : ''}
                       </div>
                     )}
                   </div>
-                )}
+                  {r.count2_qty !== null && (
+                    <div className="rounded-lg border px-3 py-2" style={{ borderColor: '#c4b5fd', background: '#f5f3ff' }}>
+                      <div className="text-[9px] font-bold uppercase" style={{ color: '#7c3aed' }}>Count 2</div>
+                      <div className="font-mono text-lg font-bold mt-0.5">{r.count2_qty}</div>
+                      {(r.count2_direct_qty || r.count2_wip_qty || r.count2_external_qty) && (
+                        <div className="text-[10px] mt-0.5" style={{ color: '#7c3aed80' }}>
+                          {r.count2_direct_qty ?? 0} part{r.count2_wip_qty ? ` + ${r.count2_wip_qty} wip` : ''}{r.count2_external_qty ? ` + ${r.count2_external_qty} ext` : ''}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
 
-                {/* Counter Breakdown — side-by-side cards */}
+              {/* Recount reasons */}
+              {r.recount_reasons.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wide mb-1.5">Recount Reasons</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {r.recount_reasons.map(reason => (
+                      <span key={reason} className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">
+                        {REASON_LABELS[reason] || reason}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Accepted by */}
+              {r.accepted_by && (
+                <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                  <CheckCircle size={14} className="text-emerald-500 flex-shrink-0" />
+                  <span>{r.accepted_by}{r.accepted_at ? ` · ${new Date(r.accepted_at).toLocaleString()}` : ''}</span>
+                </div>
+              )}
+
+              {/* Counter Breakdown */}
+              <div>
+                <div className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wide mb-2">Counter Breakdown</div>
                 {loadingBreakdown && (
-                  <div className="text-[11px] text-[var(--muted)] py-2">Loading breakdown...</div>
+                  <div className="flex items-center gap-2 py-4 text-[11px] text-[var(--muted)]">
+                    <div className="w-4 h-4 border-2 border-[var(--primary)] border-t-transparent rounded-full animate-spin" />
+                    Loading...
+                  </div>
                 )}
                 {breakdown && (breakdown.count1.length > 0 || breakdown.count2.length > 0) && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-3">
                     {[
                       { label: 'Count 1', entries: breakdown.count1, storedQty: r.count1_qty, isStale: c1OutOfSync },
                       { label: 'Count 2', entries: breakdown.count2, storedQty: r.count2_qty, isStale: c2OutOfSync },
@@ -1283,8 +1385,7 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
                       const groupWip = group.entries.reduce((s, c) => s + c.wip, 0);
                       const groupExt = group.entries.reduce((s, c) => s + c.ext, 0);
                       return (
-                        <div key={group.label} className="bg-white rounded-lg border overflow-hidden" style={{ borderColor: group.isStale ? '#fbbf24' : 'var(--card-border)' }}>
-                          {/* Card header */}
+                        <div key={group.label} className="rounded-lg border overflow-hidden" style={{ borderColor: group.isStale ? '#fbbf24' : 'var(--card-border)' }}>
                           <div className="flex items-center justify-between px-3 py-1.5 border-b" style={{ borderColor: 'var(--card-border)', background: group.label === 'Count 2' ? '#f5f3ff' : '#f8fafc' }}>
                             <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: group.label === 'Count 2' ? '#7c3aed' : 'var(--muted)' }}>
                               {group.label}
@@ -1292,41 +1393,37 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
                             <span className="font-mono text-sm font-bold" style={{ color: group.isStale ? '#d97706' : undefined }}>
                               {groupTotal}
                               {group.isStale && (
-                                <span className="text-[9px] font-normal text-amber-500 ml-1" title={`Stored: ${group.storedQty}`}>
-                                  (stored: {group.storedQty})
-                                </span>
+                                <span className="text-[9px] font-normal text-amber-500 ml-1">(stored: {group.storedQty})</span>
                               )}
                             </span>
                           </div>
-                          {/* Counter rows */}
                           <table className="w-full text-[11px]">
                             <thead>
                               <tr className="border-b" style={{ borderColor: 'var(--card-border)' }}>
-                                <th className="text-left pl-3 pr-2 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase">Counter</th>
-                                <th className="text-right px-2 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase">Part</th>
-                                <th className="text-right px-2 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase">WIP</th>
-                                <th className="text-right px-2 py-1 text-[9px] font-semibold text-amber-600 uppercase">Ext</th>
-                                <th className="text-right px-2 pr-3 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase">Total</th>
+                                <th className="text-left pl-3 pr-2 py-1.5 text-[9px] font-semibold text-[var(--muted)] uppercase">Counter</th>
+                                <th className="text-right px-2 py-1.5 text-[9px] font-semibold text-[var(--muted)] uppercase">Part</th>
+                                <th className="text-right px-2 py-1.5 text-[9px] font-semibold text-[var(--muted)] uppercase">WIP</th>
+                                <th className="text-right px-2 py-1.5 text-[9px] font-semibold text-amber-600 uppercase">Ext</th>
+                                <th className="text-right px-2 pr-3 py-1.5 text-[9px] font-semibold text-[var(--muted)] uppercase">Total</th>
                               </tr>
                             </thead>
                             <tbody>
                               {group.entries.map((c, i) => (
                                 <tr key={i} className="border-b last:border-0" style={{ borderColor: 'var(--card-border)' }}>
-                                  <td className="pl-3 pr-2 py-1 font-medium">{c.counter}</td>
-                                  <td className="text-right px-2 py-1 font-mono">{c.direct || '—'}</td>
-                                  <td className="text-right px-2 py-1 font-mono text-[var(--muted)]">{c.wip || '—'}</td>
-                                  <td className="text-right px-2 py-1 font-mono text-amber-600">{c.ext || '—'}</td>
-                                  <td className="text-right px-2 pr-3 py-1 font-mono font-semibold">{c.total}</td>
+                                  <td className={`pl-3 pr-2 py-1.5 font-medium ${c.counter === 'Carried from Count 1' ? 'italic text-[var(--muted)]' : ''}`}>{c.counter}</td>
+                                  <td className="text-right px-2 py-1.5 font-mono">{c.direct || '—'}</td>
+                                  <td className="text-right px-2 py-1.5 font-mono text-[var(--muted)]">{c.wip || '—'}</td>
+                                  <td className="text-right px-2 py-1.5 font-mono text-amber-600">{c.ext || '—'}</td>
+                                  <td className="text-right px-2 pr-3 py-1.5 font-mono font-semibold">{c.total}</td>
                                 </tr>
                               ))}
-                              {/* Totals row */}
                               {group.entries.length > 1 && (
                                 <tr className="bg-slate-50/80">
-                                  <td className="pl-3 pr-2 py-1 text-[10px] font-semibold text-[var(--muted)] uppercase">Total</td>
-                                  <td className="text-right px-2 py-1 font-mono font-bold text-[var(--foreground)]">{groupDirect || '—'}</td>
-                                  <td className="text-right px-2 py-1 font-mono font-bold text-[var(--muted)]">{groupWip || '—'}</td>
-                                  <td className="text-right px-2 py-1 font-mono font-bold text-amber-600">{groupExt || '—'}</td>
-                                  <td className="text-right px-2 pr-3 py-1 font-mono font-bold">{groupTotal}</td>
+                                  <td className="pl-3 pr-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase">Total</td>
+                                  <td className="text-right px-2 py-1.5 font-mono font-bold">{groupDirect || '—'}</td>
+                                  <td className="text-right px-2 py-1.5 font-mono font-bold text-[var(--muted)]">{groupWip || '—'}</td>
+                                  <td className="text-right px-2 py-1.5 font-mono font-bold text-amber-600">{groupExt || '—'}</td>
+                                  <td className="text-right px-2 pr-3 py-1.5 font-mono font-bold">{groupTotal}</td>
                                 </tr>
                               )}
                             </tbody>
@@ -1337,10 +1434,10 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
                   </div>
                 )}
               </div>
-            </td>
-          </tr>
-        );
-      })()}
+            </div>
+          </>
+        )}
+      </div>
     </>
   );
 }
