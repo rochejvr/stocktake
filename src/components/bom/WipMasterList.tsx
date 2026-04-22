@@ -12,11 +12,12 @@ interface WipMasterListProps {
   onSelectWip: (wip: string) => void;
   showMissingOnly: boolean;
   onClearMissing: () => void;
+  wipScanTotals?: Record<string, { count1: number; count2: number }>;
 }
 
 export function WipMasterList({
   mappings, search, onSearchChange, selectedWip, onSelectWip,
-  showMissingOnly, onClearMissing,
+  showMissingOnly, onClearMissing, wipScanTotals,
 }: WipMasterListProps) {
   const grouped = useMemo(() => {
     const map: Record<string, BomMapping[]> = {};
@@ -99,7 +100,23 @@ export function WipMasterList({
                   {wip}
                 </div>
               </div>
-              <span className="badge badge-slate text-[9px]">{components.length}</span>
+              {(() => {
+                const totals = wipScanTotals?.[wip];
+                if (totals && (totals.count1 > 0 || totals.count2 > 0)) {
+                  return (
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <span className="font-mono text-[10px] font-semibold text-[var(--muted)] tabular-nums">{totals.count1}</span>
+                      {totals.count2 > 0 && (
+                        <>
+                          <span className="text-[8px] text-[var(--muted-light)]">/</span>
+                          <span className="font-mono text-[10px] font-bold tabular-nums" style={{ color: '#7c3aed' }}>{totals.count2}</span>
+                        </>
+                      )}
+                    </div>
+                  );
+                }
+                return <span className="badge badge-slate text-[9px]" style={{ opacity: 0.4 }}>0</span>;
+              })()}
               {hasMissing && (
                 <span className="badge badge-amber text-[9px]">{missingN}</span>
               )}

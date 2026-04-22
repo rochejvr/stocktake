@@ -26,19 +26,22 @@ export default function BomPage() {
   const [compareB, setCompareB] = useState('');
   const [showChains, setShowChains] = useState(false);
   const [showAddChain, setShowAddChain] = useState(false);
+  const [wipScanTotals, setWipScanTotals] = useState<Record<string, { count1: number; count2: number }>>({});
 
   useEffect(() => { load(); }, []);
 
   async function load() {
     setLoading(true);
-    const [wRes, cRes, catRes] = await Promise.all([
+    const [wRes, cRes, catRes, stRes] = await Promise.all([
       fetch('/api/bom/mappings'),
       fetch('/api/bom/chains'),
       fetch('/api/components?active=true'),
+      fetch('/api/bom/wip-scan-totals'),
     ]);
     if (wRes.ok) setMappings(await wRes.json());
     if (cRes.ok) setChains(await cRes.json());
     if (catRes.ok) setCatalog(await catRes.json());
+    if (stRes.ok) setWipScanTotals(await stRes.json());
     setLoading(false);
   }
 
@@ -187,6 +190,7 @@ export default function BomPage() {
               onSelectWip={setSelectedWip}
               showMissingOnly={showMissingOnly}
               onClearMissing={() => setShowMissingOnly(false)}
+              wipScanTotals={wipScanTotals}
             />
           </div>
 
