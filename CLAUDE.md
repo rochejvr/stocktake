@@ -2,7 +2,7 @@
 
 # Stock Take — Xavant Technology
 
-Quarterly stock take management app. Import Pastel inventory → department checklist sign-offs → mobile barcode scanning → variance reconciliation → Pastel adjustment export.
+Monthly stock take management app (v0.4.1). Import Pastel inventory → department checklist sign-offs → mobile barcode scanning → variance reconciliation → Pastel adjustment export.
 
 ## Quick Start
 
@@ -65,10 +65,10 @@ Root layout (`layout.tsx`) wraps all pages in `AppShell` which provides:
 | Route | Purpose |
 |-------|---------|
 | `/api/stock-takes` | CRUD, `/active`, `/check`, `[id]/end-counting`, `[id]/export` |
-| `/api/scan/lookup` | Validate barcode against Pastel inventory + BOM |
-| `/api/scan-sessions` | Counter session CRUD, `[id]/submit`, `[id]/records` |
+| `/api/scan/lookup` | Case-insensitive barcode lookup against Pastel + BOM; returns canonical casing |
+| `/api/scan-sessions` | Counter session CRUD, `[id]/submit`, `[id]/records`, `[id]/import-external` |
 | `/api/scan-records` | Individual barcode scan records |
-| `/api/count-results` | Aggregated counts, `[id]` accept/reject, `/recount-list` |
+| `/api/count-results` | Aggregated counts, `[id]` accept/reject, `[id]/breakdown`, `/recount-list` |
 | `/api/counters` | Counter CRUD, `/login` (PIN auth) |
 | `/api/bom/mappings` | WIP component mappings, `/wip/[wipCode]` |
 | `/api/bom/chains` | Component chains (scan X → also credit Y) |
@@ -80,8 +80,8 @@ Root layout (`layout.tsx`) wraps all pages in `AppShell` which provides:
 
 ### Key Libraries (`src/lib/`)
 
-- `supabase.ts` — Supabase client init
-- `constants.ts` — Tier thresholds, recount logic, store/tier labels, deadlines
+- `supabase.ts` — Supabase client init + `fetchAll()` helper for paginated queries (Supabase 1000-row limit)
+- `constants.ts` — Tier thresholds, recount logic, store/tier labels, `buildReference(year, month)`
 
 ### Key Components (`src/components/`)
 
@@ -92,6 +92,7 @@ Root layout (`layout.tsx`) wraps all pages in `AppShell` which provides:
 - `shared/ScanQRCard.tsx` — QR code for mobile scanner URL
 - `shared/ComponentSearch.tsx` — Searchable component selector
 - `shared/StockTakeClock.tsx` — Countdown timer
+- `shared/ConfirmDialog.tsx` — Reusable confirmation modal (destructive/primary)
 - `bom/WipMasterList.tsx` — BOM hierarchy viewer
 - `bom/WipDetailPanel.tsx` — Edit BOM components for a WIP
 - `bom/BomStatsBar.tsx` — Missing/mapped component counts
@@ -102,7 +103,7 @@ Root layout (`layout.tsx`) wraps all pages in `AppShell` which provides:
 
 | Table | Purpose |
 |-------|---------|
-| `stock_takes` | Master record — status, deadlines, reference (ST-YYYY-QN) |
+| `stock_takes` | Master record — status, deadlines, reference (ST-YYYYMM), current_round |
 | `pastel_inventory` | Imported inventory with tier (A/B/C) and store (001/002) |
 | `bom_mappings` | WIP code → component code with qty_per_wip |
 | `component_chains` | Scan code X → also credit code Y |
@@ -150,6 +151,31 @@ Additional recount triggers:
 - **Zero count with Pastel balance**: counted 0 but Pastel shows stock
 - **Significant change vs prior stock take**
 - **Manual supervisor flag**
+
+## Count 2 Scoping (v0.4.1)
+
+When end-counting runs in recount mode, count2_* is only populated for items **in scope**:
+1. Items with `recount_flagged = true`
+2. Chain descendants of flagged items (via `component_chains`)
+3. Items directly scanned in count 2 (intentional user action)
+
+WIP-explosion contributions are filtered: only flagged components receive WIP-exploded credits.
+Items out of scope **preserve their existing count2 values** across rounds (split-batch upserts: `upsertsWithC2` vs `upsertsC1Only`).
+
+### Channel-aware per-item latest-round replacement
+Sessions may be scattered across multiple rounds (due to counter resume/relogin). No global round filter — instead, for each target part, only the latest round where it was scanned **per channel** is used. Channels: direct, WIP (includes chain credits), external. A WIP contribution in round N+1 does NOT filter out direct scans from round N for the same part.
+- **Pass 1**: Compute three channel maps (`maxRoundDirect`, `maxRoundWip`, `maxRoundExternal`) — highest round_number per target (part|store) within each channel
+- **Pass 2**: `aggregateRecords` skips records from rounds < channelMaxRound for each target
+- Within the latest round per channel, scans from multiple counters ADD together
+- Breakdown API uses the same channel-aware logic (`maxC2RoundDirect`, `maxC2RoundWip`, `maxC2RoundExt`)
+
+Key functions:
+- `shouldPreferCount2(r)` — returns true when `|c2 - pastel| < |c1 - pastel|` (lower variance = more accurate)
+- `fetchAll()` in `src/lib/supabase.ts` — all large queries MUST use this (Supabase 1000-row default limit)
+- External stock auto-carried from count1 when not re-imported in count2
+
+Barcode lookups use `.ilike()` for case-insensitive matching. Lookup API returns canonical DB casing.
+`bomLookup` in end-counting uses lowercase keys for case-insensitive WIP explosion.
 
 ## Barcode Scanning
 

@@ -46,17 +46,17 @@ export async function POST(
   // Load ALL BOM mappings for WIP explosion (WIP → component parts)
   // Must paginate — Supabase defaults to 1000 row limit
   let bomMappings: Array<{ wip_code: string; component_code: string; qty_per_wip: number }> = [];
+  const PAGE_SIZE = 1000;
   let bomOffset = 0;
-  const BOM_PAGE = 1000;
   while (true) {
     const { data: page } = await supabase
       .from('bom_mappings')
       .select('wip_code, component_code, qty_per_wip')
-      .range(bomOffset, bomOffset + BOM_PAGE - 1);
+      .range(bomOffset, bomOffset + PAGE_SIZE - 1);
     if (!page || page.length === 0) break;
     bomMappings = bomMappings.concat(page);
-    if (page.length < BOM_PAGE) break;
-    bomOffset += BOM_PAGE;
+    if (page.length < PAGE_SIZE) break;
+    bomOffset += PAGE_SIZE;
   }
 
   // Build bomLookup with lowercase keys for case-insensitive matching against scan_records
@@ -71,8 +71,9 @@ export async function POST(
 
   // Helper: aggregate scan records into direct/wip/external/totals maps.
   // allowedKeys: filter (count 2 only) — skip contributions to keys not in this set.
-  // maxRoundMap: per-item latest-round logic (count 2 only) — skip records from older
-  // rounds when a newer round has scans for the same target part.
+  // Channel-aware per-item latest-round logic (count 2 only): each contribution channel
+  // (direct, wip, external) tracks its own max round independently, so a WIP scan in
+  // round N+1 does NOT filter out direct scans from round N for the same part.
   type ScanRec = { barcode: string; quantity: number; store_code: string; chained_from: string | null; source: string; session_id?: string };
   function aggregateRecords(
     records: ScanRec[],
@@ -81,14 +82,16 @@ export async function POST(
     external: Record<string, number>,
     totals: Record<string, number>,
     allowedKeys?: Set<string>,
-    maxRoundMap?: Map<string, number>,
+    maxRoundDirect?: Map<string, number>,
+    maxRoundWip?: Map<string, number>,
+    maxRoundExternal?: Map<string, number>,
     sessRoundMap?: Map<string, number>,
   ) {
     const isAllowed = (key: string) => !allowedKeys || allowedKeys.has(key);
-    const isLatestRound = (key: string, sessionId?: string) => {
-      if (!maxRoundMap || !sessRoundMap || !sessionId) return true;
+    const isLatestRound = (key: string, channelMap: Map<string, number> | undefined, sessionId?: string) => {
+      if (!channelMap || !sessRoundMap || !sessionId) return true;
       const round = sessRoundMap.get(sessionId) ?? 1;
-      return round >= (maxRoundMap.get(key) ?? 0);
+      return round >= (channelMap.get(key) ?? 0);
     };
 
     for (const r of records) {
@@ -97,20 +100,20 @@ export async function POST(
 
       if (r.source === 'external') {
         const key = `${r.barcode}|${store}`;
-        if (!isLatestRound(key, r.session_id)) continue;
+        if (!isLatestRound(key, maxRoundExternal, r.session_id)) continue;
         if (!isAllowed(key)) continue;
         external[key] = (external[key] || 0) + qty;
         totals[key] = (totals[key] || 0) + qty;
       } else if (r.chained_from) {
         const key = `${r.barcode}|${store}`;
-        if (!isLatestRound(key, r.session_id)) continue;
+        if (!isLatestRound(key, maxRoundWip, r.session_id)) continue;
         if (!isAllowed(key)) continue;
         wip[key] = (wip[key] || 0) + qty;
         totals[key] = (totals[key] || 0) + qty;
       } else if (bomLookup[r.barcode.toLowerCase()]) {
         for (const comp of bomLookup[r.barcode.toLowerCase()]) {
           const compKey = `${comp.component_code}|${store}`;
-          if (!isLatestRound(compKey, r.session_id)) continue;
+          if (!isLatestRound(compKey, maxRoundWip, r.session_id)) continue;
           if (!isAllowed(compKey)) continue;
           const compQty = qty * comp.qty_per_wip;
           wip[compKey] = (wip[compKey] || 0) + compQty;
@@ -118,7 +121,7 @@ export async function POST(
         }
       } else {
         const key = `${r.barcode}|${store}`;
-        if (!isLatestRound(key, r.session_id)) continue;
+        if (!isLatestRound(key, maxRoundDirect, r.session_id)) continue;
         if (!isAllowed(key)) continue;
         direct[key] = (direct[key] || 0) + qty;
         totals[key] = (totals[key] || 0) + qty;
@@ -178,11 +181,20 @@ export async function POST(
   const scanExternal: Record<string, number> = {};
   const scanTotals: Record<string, number> = {};
   if (sessionIds.length > 0) {
-    const { data: records } = await supabase
-      .from('scan_records')
-      .select('barcode, quantity, store_code, chained_from, source, session_id')
-      .in('session_id', sessionIds);
-    const allRecords = (records || []) as ScanRec[];
+    // Paginate scan_records — can exceed Supabase 1000-row default limit
+    let allRecords: ScanRec[] = [];
+    let recOffset = 0;
+    while (true) {
+      const { data: recPage } = await supabase
+        .from('scan_records')
+        .select('barcode, quantity, store_code, chained_from, source, session_id')
+        .in('session_id', sessionIds)
+        .range(recOffset, recOffset + PAGE_SIZE - 1);
+      if (!recPage || recPage.length === 0) break;
+      allRecords = allRecords.concat(recPage as ScanRec[]);
+      if (recPage.length < PAGE_SIZE) break;
+      recOffset += PAGE_SIZE;
+    }
 
     // Expand flaggedKeys: any XM that was directly scanned (or imported as external)
     // in count 2 is an intentional recount action, regardless of its flag status.
@@ -197,31 +209,44 @@ export async function POST(
       }
     }
 
-    // Pass 1: compute max round per target part (for count 2 per-item replacement).
-    // Each part uses ONLY the latest round where it was scanned from any source.
-    let maxRoundMap: Map<string, number> | undefined;
+    // Pass 1: compute max round per target part PER CHANNEL (for count 2 per-item replacement).
+    // Channel-aware: a WIP contribution in round N+1 does NOT filter out direct scans
+    // from round N. Each channel (direct, wip, external) tracks its own max round.
+    let maxRoundDirect: Map<string, number> | undefined;
+    let maxRoundWip: Map<string, number> | undefined;
+    let maxRoundExternal: Map<string, number> | undefined;
     if (isRecount) {
-      maxRoundMap = new Map();
+      maxRoundDirect = new Map();
+      maxRoundWip = new Map();
+      maxRoundExternal = new Map();
       for (const r of allRecords) {
         const store = r.store_code || '001';
         const round = sessionRoundMap.get(r.session_id || '') ?? 1;
-        if (bomLookup[r.barcode.toLowerCase()]) {
-          // WIP scan: each BOM component is a target
+        if (r.source === 'external') {
+          const key = `${r.barcode}|${store}`;
+          maxRoundExternal.set(key, Math.max(maxRoundExternal.get(key) ?? 0, round));
+        } else if (r.chained_from) {
+          // Chain credits share the WIP channel
+          const key = `${r.barcode}|${store}`;
+          maxRoundWip.set(key, Math.max(maxRoundWip.get(key) ?? 0, round));
+        } else if (bomLookup[r.barcode.toLowerCase()]) {
+          // WIP scan: each BOM component is a target in the WIP channel
           for (const comp of bomLookup[r.barcode.toLowerCase()]) {
             const compKey = `${comp.component_code}|${store}`;
-            maxRoundMap.set(compKey, Math.max(maxRoundMap.get(compKey) ?? 0, round));
+            maxRoundWip.set(compKey, Math.max(maxRoundWip.get(compKey) ?? 0, round));
           }
         } else {
-          // Direct/external/chain: barcode is the target
+          // Direct scan
           const key = `${r.barcode}|${store}`;
-          maxRoundMap.set(key, Math.max(maxRoundMap.get(key) ?? 0, round));
+          maxRoundDirect.set(key, Math.max(maxRoundDirect.get(key) ?? 0, round));
         }
       }
     }
 
-    // Pass 2: aggregate only latest-round records per target, filtered by flaggedKeys
+    // Pass 2: aggregate only latest-round records per target per channel, filtered by flaggedKeys
     aggregateRecords(allRecords, scanDirect, scanWip, scanExternal, scanTotals,
-      flaggedKeys, maxRoundMap, isRecount ? sessionRoundMap : undefined);
+      flaggedKeys, maxRoundDirect, maxRoundWip, maxRoundExternal,
+      isRecount ? sessionRoundMap : undefined);
   }
 
   // For recounts: also re-aggregate count1 from count_number=1 sessions
@@ -238,11 +263,20 @@ export async function POST(
       .eq('count_number', 1);
     const c1SessionIds = (c1Sessions || []).map(s => s.id);
     if (c1SessionIds.length > 0) {
-      const { data: c1Records } = await supabase
-        .from('scan_records')
-        .select('barcode, quantity, store_code, chained_from, source')
-        .in('session_id', c1SessionIds);
-      aggregateRecords(c1Records || [], c1Direct, c1Wip, c1External, c1Totals);
+      let c1Records: ScanRec[] = [];
+      let c1RecOffset = 0;
+      while (true) {
+        const { data: c1Page } = await supabase
+          .from('scan_records')
+          .select('barcode, quantity, store_code, chained_from, source')
+          .in('session_id', c1SessionIds)
+          .range(c1RecOffset, c1RecOffset + PAGE_SIZE - 1);
+        if (!c1Page || c1Page.length === 0) break;
+        c1Records = c1Records.concat(c1Page as ScanRec[]);
+        if (c1Page.length < PAGE_SIZE) break;
+        c1RecOffset += PAGE_SIZE;
+      }
+      aggregateRecords(c1Records, c1Direct, c1Wip, c1External, c1Totals);
     }
 
     // External supplier stock is offsite and easily forgotten during recount.
@@ -266,17 +300,16 @@ export async function POST(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let inventory: Array<any> = [];
   let invOffset = 0;
-  const INV_PAGE = 1000;
   while (true) {
     const { data: page } = await supabase
       .from('pastel_inventory')
       .select('*')
       .eq('stock_take_id', id)
-      .range(invOffset, invOffset + INV_PAGE - 1);
+      .range(invOffset, invOffset + PAGE_SIZE - 1);
     if (!page || page.length === 0) break;
     inventory = inventory.concat(page);
-    if (page.length < INV_PAGE) break;
-    invOffset += INV_PAGE;
+    if (page.length < PAGE_SIZE) break;
+    invOffset += PAGE_SIZE;
   }
 
   if (inventory.length === 0) {

@@ -84,23 +84,30 @@ export async function GET(
     }
   }
 
-  // 6. Compute max round for THIS part across all count 2 contribution types.
-  // For count 2, only the latest round's data is used (per-item replacement).
-  let maxC2Round = 0;
-  const allC2SessionIds: string[] = [];
+  // 6. Compute max round for THIS part per channel across count 2 contribution types.
+  // Channel-aware: a WIP contribution in round N+1 does NOT filter out direct scans
+  // from round N. Each channel tracks its own max round independently.
+  let maxC2RoundDirect = 0;
+  let maxC2RoundWip = 0;
+  let maxC2RoundExt = 0;
   if (directRecords) {
     for (const r of directRecords) {
       const sess = sessionMap.get(r.session_id);
       if (sess?.countNumber === 2) {
-        maxC2Round = Math.max(maxC2Round, sess.roundNumber);
-        allC2SessionIds.push(r.session_id);
+        if (r.source === 'external') {
+          maxC2RoundExt = Math.max(maxC2RoundExt, sess.roundNumber);
+        } else if (r.chained_from) {
+          maxC2RoundWip = Math.max(maxC2RoundWip, sess.roundNumber);
+        } else {
+          maxC2RoundDirect = Math.max(maxC2RoundDirect, sess.roundNumber);
+        }
       }
     }
   }
   for (const r of wipRecords) {
     const sess = sessionMap.get(r.session_id);
     if (sess?.countNumber === 2) {
-      maxC2Round = Math.max(maxC2Round, sess.roundNumber);
+      maxC2RoundWip = Math.max(maxC2RoundWip, sess.roundNumber);
     }
   }
 
@@ -112,8 +119,13 @@ export async function GET(
     const sess = sessionMap.get(sessionId);
     if (!sess) return;
     const cn = sess.countNumber as 1 | 2;
-    // For count 2: only include records from the latest round (per-item replacement)
-    if (cn === 2 && maxC2Round > 0 && sess.roundNumber < maxC2Round) return;
+    // For count 2: only include records from the latest round for THIS channel
+    if (cn === 2) {
+      const channelMax = type === 'direct' ? maxC2RoundDirect
+                       : type === 'ext' ? maxC2RoundExt
+                       : maxC2RoundWip;
+      if (channelMax > 0 && sess.roundNumber < channelMax) return;
+    }
     const map = countMap[cn];
     if (!map.has(userName)) {
       map.set(userName, { counter: userName, direct: 0, wip: 0, ext: 0, total: 0 });

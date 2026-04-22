@@ -170,6 +170,7 @@ export interface ScanSession {
   user_id: string;
   user_name: string;
   count_number: CountNumber;
+  round_number: number;
   zone: string | null;            // optional zone assignment
   started_at: string;
   submitted_at: string | null;
