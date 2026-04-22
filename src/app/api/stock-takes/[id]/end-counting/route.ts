@@ -3,7 +3,9 @@ import { supabase } from '@/lib/supabase';
 import { RECOUNT_THRESHOLDS, RECOUNT_ZAR_THRESHOLD, ROUND_NUMBER_MULTIPLES } from '@/lib/constants';
 
 // POST /api/stock-takes/[id]/end-counting
-// Aggregates scan records into count_results, flags variances, advances status
+// Aggregates scan records into count_results, flags variances, advances status.
+// Query param ?reaggregate=true: re-run aggregation from 'reviewing' status without
+// changing status or round — just refreshes count_results to match scan_records.
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -11,8 +13,9 @@ export async function POST(
   if (!supabase) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 });
 
   const { id } = await params;
+  const reaggregate = _request.nextUrl.searchParams.get('reaggregate') === 'true';
 
-  // 1. Verify stock take is in counting or recount status
+  // 1. Verify stock take status
   const { data: st, error: stErr } = await supabase
     .from('stock_takes')
     .select('*')
@@ -20,11 +23,24 @@ export async function POST(
     .single();
 
   if (stErr || !st) return NextResponse.json({ error: 'Stock take not found' }, { status: 404 });
-  if (st.status !== 'counting' && st.status !== 'recount') {
-    return NextResponse.json({ error: `Stock take is in '${st.status}' status, not counting/recount` }, { status: 400 });
+
+  const allowedStatuses = reaggregate
+    ? ['counting', 'recount', 'reviewing']
+    : ['counting', 'recount'];
+  if (!allowedStatuses.includes(st.status)) {
+    return NextResponse.json({ error: `Stock take is in '${st.status}' status, not ${allowedStatuses.join('/')}` }, { status: 400 });
   }
 
-  const isRecount = st.status === 'recount';
+  // For re-aggregation from reviewing: determine if count 2 exists by checking sessions
+  let isRecount = st.status === 'recount';
+  if (reaggregate && st.status === 'reviewing') {
+    const { count } = await supabase
+      .from('scan_sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('stock_take_id', id)
+      .eq('count_number', 2);
+    isRecount = (count ?? 0) > 0;
+  }
   const countNumber = isRecount ? 2 : 1;
   const countCol = isRecount ? 'count2_qty' : 'count1_qty';
 
@@ -521,21 +537,24 @@ export async function POST(
       .eq('store_code', fu.store_code);
   }
 
-  // 5. Advance status
-  const newStatus = (!isRecount && flaggedCount > 0) ? 'recount' : 'reviewing';
-  const update: Record<string, unknown> = { status: newStatus };
+  // 5. Advance status (skip during re-aggregation — just refresh data, don't change state)
+  const newStatus = reaggregate ? st.status : ((!isRecount && flaggedCount > 0) ? 'recount' : 'reviewing');
+  if (!reaggregate) {
+    const update: Record<string, unknown> = { status: newStatus };
 
-  const { error: statusErr } = await supabase
-    .from('stock_takes')
-    .update(update)
-    .eq('id', id);
+    const { error: statusErr } = await supabase
+      .from('stock_takes')
+      .update(update)
+      .eq('id', id);
 
-  if (statusErr) {
-    return NextResponse.json({ error: `Failed to update status: ${statusErr.message}` }, { status: 500 });
+    if (statusErr) {
+      return NextResponse.json({ error: `Failed to update status: ${statusErr.message}` }, { status: 500 });
+    }
   }
 
   return NextResponse.json({
     status: newStatus,
+    reaggregated: reaggregate,
     totalParts: inventory.length,
     countedParts: Object.keys(scanTotals).length,
     flaggedForRecount: flaggedCount,

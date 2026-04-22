@@ -11,10 +11,10 @@ export async function GET(
 
   const { id } = await params;
 
-  // 1. Get the count_result to find stock_take_id, part_number, store_code
+  // 1. Get the count_result to find stock_take_id, part_number, store_code + external qtys
   const { data: result, error } = await supabase
     .from('count_results')
-    .select('stock_take_id, part_number, store_code')
+    .select('stock_take_id, part_number, store_code, count1_external_qty, count2_external_qty')
     .eq('id', id)
     .single();
 
@@ -157,6 +157,22 @@ export async function GET(
   for (const r of wipRecords) {
     const creditedQty = Number(r.quantity) * r.qty_per_wip;
     addToCount(r.session_id, r.user_name, creditedQty, 'wip');
+  }
+
+  // External carry-over: if count2_external_qty is set but no count 2 external
+  // scans exist, the external was auto-carried from count 1 by end-counting.
+  // Show it in the breakdown so totals match count_results.
+  const c2ExtFromScans = [...countMap[2].values()].reduce((s, e) => s + e.ext, 0);
+  const storedC2Ext = result.count2_external_qty ?? 0;
+  if (storedC2Ext > 0 && c2ExtFromScans < storedC2Ext) {
+    const carriedQty = storedC2Ext - c2ExtFromScans;
+    const carriedEntry = countMap[2].get('Carried from Count 1');
+    if (carriedEntry) {
+      carriedEntry.ext += carriedQty;
+      carriedEntry.total += carriedQty;
+    } else {
+      countMap[2].set('Carried from Count 1', { counter: 'Carried from Count 1', direct: 0, wip: 0, ext: carriedQty, total: carriedQty });
+    }
   }
 
   const toArray = (map: Map<string, Entry>) =>

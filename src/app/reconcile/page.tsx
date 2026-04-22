@@ -343,6 +343,23 @@ export default function ReconcilePage() {
   const isReviewable = stockTake?.status === 'reviewing' || stockTake?.status === 'recount';
   const isRecount = stockTake?.status === 'recount';
   const [reopening, setReopening] = useState(false);
+  const [reaggregating, setReaggregating] = useState(false);
+
+  // Re-aggregate: re-run end-counting logic without changing status or round
+  const handleReaggregate = async () => {
+    if (!stockTake) return;
+    setReaggregating(true);
+    try {
+      const res = await fetch(`/api/stock-takes/${stockTake.id}/end-counting?reaggregate=true`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        setBreakdowns({}); // clear cached breakdowns so they re-fetch
+        await fetchData();
+      }
+    } catch { /* ignore */ }
+    finally { setReaggregating(false); }
+  };
 
   // Reopen counting — set status back to recount so counters can scan again
   const handleReopenCounting = async () => {
@@ -827,6 +844,8 @@ export default function ReconcilePage() {
                         onToggleFlag={() => handleToggleFlag(r.id, r.recount_flagged)}
                         onToggleCount={() => handleToggleCountVersion(r.id)}
                         onToggleExclude={() => handleToggleExclude(r.id)}
+                        onReaggregate={handleReaggregate}
+                        reaggregating={reaggregating}
                       />
                     ))}
                   </tbody>
@@ -997,7 +1016,7 @@ const REASON_LABELS: Record<string, string> = {
   manual_supervisor_flag: 'Manually flagged by supervisor',
 };
 
-function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expanded, accepting, breakdown, loadingBreakdown, excluded, onToggleExpand, onAccept, onUnaccept, onToggleFlag, onToggleCount, onToggleExclude }: {
+function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expanded, accepting, breakdown, loadingBreakdown, excluded, onToggleExpand, onAccept, onUnaccept, onToggleFlag, onToggleCount, onToggleExclude, onReaggregate, reaggregating }: {
   result: CountResult; anyHasCount2: boolean; showingCount2: boolean; isReviewable: boolean;
   expanded: boolean; accepting: boolean;
   breakdown?: CounterBreakdown; loadingBreakdown?: boolean;
@@ -1005,6 +1024,7 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
   onToggleExpand: () => void; onAccept: (qty: number) => void; onUnaccept: () => void;
   onToggleFlag: () => void; onToggleCount: () => void;
   onToggleExclude: () => void;
+  onReaggregate: () => void; reaggregating: boolean;
 }) {
   // Active count: use C2 if toggled and available, else C1
   const useCount2 = showingCount2 && r.count2_qty !== null;
@@ -1187,14 +1207,23 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
 
                 {/* Sync warning banner */}
                 {outOfSync && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
-                    <AlertTriangle size={14} className="flex-shrink-0 text-amber-500" />
-                    <span>
-                      Live breakdown totals differ from stored values
-                      {c2OutOfSync && ` (C2: ${bdC2Total} live vs ${r.count2_qty} stored)`}
-                      {c1OutOfSync && ` (C1: ${bdC1Total} live vs ${r.count1_qty} stored)`}
-                      . <strong>Re-aggregate</strong> to sync.
-                    </span>
+                  <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle size={14} className="flex-shrink-0 text-amber-500" />
+                      <span>
+                        Breakdown totals differ from stored values
+                        {c2OutOfSync && ` (C2: ${bdC2Total} live vs ${r.count2_qty} stored)`}
+                        {c1OutOfSync && ` (C1: ${bdC1Total} live vs ${r.count1_qty} stored)`}
+                      </span>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onReaggregate(); }}
+                      disabled={reaggregating}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-amber-600 text-white text-[11px] font-semibold hover:bg-amber-700 transition-colors disabled:opacity-50 flex-shrink-0"
+                    >
+                      <RotateCcw size={12} className={reaggregating ? 'animate-spin' : ''} />
+                      {reaggregating ? 'Re-aggregating...' : 'Re-aggregate'}
+                    </button>
                   </div>
                 )}
 
