@@ -1172,111 +1172,146 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
           </td>
         )}
       </tr>
-      {expanded && (
-        <tr className="bg-slate-50">
-          <td colSpan={colCount} className="px-4 py-3">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-              <div>
-                <div className="text-[10px] font-semibold text-[var(--muted)] uppercase mb-0.5">Tier</div>
-                <div>{TIER_LABELS[r.tier] || r.tier}</div>
-              </div>
-              <div>
-                <div className="text-[10px] font-semibold text-[var(--muted)] uppercase mb-0.5">Unit Cost</div>
-                <div>{r.unit_cost !== null ? `R${Number(r.unit_cost).toFixed(2)}` : '—'}</div>
-              </div>
-              <div>
-                <div className="text-[10px] font-semibold text-[var(--muted)] uppercase mb-0.5">Value Variance</div>
-                <div style={{ color: varianceColor }}>
-                  {r.unit_cost !== null && varQty !== null
-                    ? `R${(varQty * Number(r.unit_cost)).toFixed(2)}`
-                    : '—'}
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] font-semibold text-[var(--muted)] uppercase mb-0.5">Accepted Qty</div>
-                <div>{r.accepted_qty !== null ? r.accepted_qty : '—'}</div>
-              </div>
-              {/* Show both counts in detail if count 2 exists */}
-              {hasCount2Data && (
-                <div className="col-span-2 md:col-span-4">
-                  <div className="text-[10px] font-semibold text-[var(--muted)] uppercase mb-1">Count History</div>
-                  <div className="flex gap-6">
-                    <div>
-                      <span className="text-[10px] text-[var(--muted)]">Count 1:</span>{' '}
-                      <span className="font-mono font-bold">{r.count1_qty ?? '—'}</span>
-                      {(r.count1_wip_qty || r.count1_external_qty) ? <span className="text-[10px] text-[var(--muted)]"> ({r.count1_direct_qty ?? 0} part{r.count1_wip_qty ? ` + ${r.count1_wip_qty} wip` : ''}{r.count1_external_qty ? ` + ${r.count1_external_qty} ext` : ''})</span> : null}
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-[var(--muted)]">Count 2:</span>{' '}
-                      <span className="font-mono font-bold">{r.count2_qty ?? '—'}</span>
-                      {(r.count2_wip_qty || r.count2_external_qty) ? <span className="text-[10px] text-[var(--muted)]"> ({r.count2_direct_qty ?? 0} part{r.count2_wip_qty ? ` + ${r.count2_wip_qty} wip` : ''}{r.count2_external_qty ? ` + ${r.count2_external_qty} ext` : ''})</span> : null}
-                    </div>
+      {expanded && (() => {
+        // Sync detection: compare live breakdown totals with stored count_results
+        const bdC1Total = breakdown?.count1.reduce((s, c) => s + c.total, 0) ?? null;
+        const bdC2Total = breakdown?.count2.reduce((s, c) => s + c.total, 0) ?? null;
+        const c1OutOfSync = breakdown && bdC1Total !== null && r.count1_qty !== null && bdC1Total !== r.count1_qty;
+        const c2OutOfSync = breakdown && bdC2Total !== null && r.count2_qty !== null && bdC2Total !== r.count2_qty;
+        const outOfSync = c1OutOfSync || c2OutOfSync;
+
+        return (
+          <tr style={{ borderColor: 'var(--card-border)' }}>
+            <td colSpan={colCount} className="p-0">
+              <div className="bg-slate-50/80 border-t px-5 py-4 space-y-4" style={{ borderColor: 'var(--card-border)' }}>
+
+                {/* Sync warning banner */}
+                {outOfSync && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                    <AlertTriangle size={14} className="flex-shrink-0 text-amber-500" />
+                    <span>
+                      Live breakdown totals differ from stored values
+                      {c2OutOfSync && ` (C2: ${bdC2Total} live vs ${r.count2_qty} stored)`}
+                      {c1OutOfSync && ` (C1: ${bdC1Total} live vs ${r.count1_qty} stored)`}
+                      . <strong>Re-aggregate</strong> to sync.
+                    </span>
                   </div>
+                )}
+
+                {/* Top stats row */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Tier', value: TIER_LABELS[r.tier] || r.tier },
+                    { label: 'Unit Cost', value: r.unit_cost !== null ? `R${Number(r.unit_cost).toFixed(2)}` : '—' },
+                    { label: 'Value Variance', value: r.unit_cost !== null && varQty !== null ? `R${(varQty * Number(r.unit_cost)).toFixed(2)}` : '—', color: varianceColor },
+                    { label: 'Accepted Qty', value: r.accepted_qty !== null ? r.accepted_qty : '—' },
+                  ].map(stat => (
+                    <div key={stat.label} className="bg-white rounded-lg border px-3 py-2" style={{ borderColor: 'var(--card-border)' }}>
+                      <div className="text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wide">{stat.label}</div>
+                      <div className="text-sm font-semibold mt-0.5" style={stat.color ? { color: stat.color } : undefined}>{stat.value}</div>
+                    </div>
+                  ))}
                 </div>
-              )}
-              {r.recount_reasons.length > 0 && (
-                <div className="col-span-2 md:col-span-4">
-                  <div className="text-[10px] font-semibold text-[var(--muted)] uppercase mb-0.5">Recount Reasons</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {r.recount_reasons.map(reason => (
-                      <span key={reason} className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">
-                        {REASON_LABELS[reason] || reason}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {r.accepted_by && (
-                <div className="col-span-2">
-                  <div className="text-[10px] font-semibold text-[var(--muted)] uppercase mb-0.5">Accepted By</div>
-                  <div>{r.accepted_by} {r.accepted_at ? `at ${new Date(r.accepted_at).toLocaleString()}` : ''}</div>
-                </div>
-              )}
-              {/* Per-counter breakdown */}
-              {loadingBreakdown && (
-                <div className="col-span-2 md:col-span-4 text-[11px] text-[var(--muted)]">Loading counter breakdown...</div>
-              )}
-              {breakdown && (breakdown.count1.length > 0 || breakdown.count2.length > 0) && (
-                <div className="col-span-2 md:col-span-4">
-                  <div className="text-[10px] font-semibold text-[var(--muted)] uppercase mb-1">Counter Breakdown</div>
-                  <div className="flex flex-col sm:flex-row gap-6">
-                    {[
-                      { label: 'Count 1', entries: breakdown.count1 },
-                      { label: 'Count 2', entries: breakdown.count2 },
-                    ].filter(g => g.entries.length > 0).map(group => (
-                      <div key={group.label}>
-                        <div className="text-[10px] text-[var(--muted)] mb-1">{group.label}</div>
-                        <table className="text-[11px]">
-                          <thead>
-                            <tr>
-                              <th className="text-left pr-3 text-[9px] font-semibold text-[var(--muted)] uppercase pb-0.5"></th>
-                              <th className="text-right px-2 text-[9px] font-semibold text-[var(--muted)] uppercase pb-0.5">Part</th>
-                              <th className="text-right px-2 text-[9px] font-semibold text-[var(--muted)] uppercase pb-0.5">WIP</th>
-                              <th className="text-right px-2 text-[9px] font-semibold text-amber-600 uppercase pb-0.5">Ext</th>
-                              <th className="text-right pl-3 text-[9px] font-semibold text-[var(--muted)] uppercase pb-0.5">Total</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {group.entries.map((c, i) => (
-                              <tr key={i}>
-                                <td className="pr-3 font-medium">{c.counter}</td>
-                                <td className="text-right px-2 font-mono">{c.direct || '—'}</td>
-                                <td className="text-right px-2 font-mono text-[var(--muted)]">{c.wip || '—'}</td>
-                                <td className="text-right px-2 font-mono text-amber-600">{c.ext || '—'}</td>
-                                <td className="text-right pl-3 font-mono font-bold">{c.total}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+
+                {/* Recount reasons + Accepted by — compact row */}
+                {(r.recount_reasons.length > 0 || r.accepted_by) && (
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
+                    {r.recount_reasons.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] font-semibold text-[var(--muted)] uppercase tracking-wide">Recount</span>
+                        <div className="flex flex-wrap gap-1">
+                          {r.recount_reasons.map(reason => (
+                            <span key={reason} className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">
+                              {REASON_LABELS[reason] || reason}
+                            </span>
+                          ))}
+                        </div>
                       </div>
-                    ))}
+                    )}
+                    {r.accepted_by && (
+                      <div className="flex items-center gap-2 text-[var(--muted)]">
+                        <CheckCircle size={12} className="text-emerald-500 flex-shrink-0" />
+                        <span className="text-[11px]">
+                          {r.accepted_by}{r.accepted_at ? ` · ${new Date(r.accepted_at).toLocaleString()}` : ''}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
-            </div>
-          </td>
-        </tr>
-      )}
+                )}
+
+                {/* Counter Breakdown — side-by-side cards */}
+                {loadingBreakdown && (
+                  <div className="text-[11px] text-[var(--muted)] py-2">Loading breakdown...</div>
+                )}
+                {breakdown && (breakdown.count1.length > 0 || breakdown.count2.length > 0) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {[
+                      { label: 'Count 1', entries: breakdown.count1, storedQty: r.count1_qty, isStale: c1OutOfSync },
+                      { label: 'Count 2', entries: breakdown.count2, storedQty: r.count2_qty, isStale: c2OutOfSync },
+                    ].filter(g => g.entries.length > 0).map(group => {
+                      const groupTotal = group.entries.reduce((s, c) => s + c.total, 0);
+                      const groupDirect = group.entries.reduce((s, c) => s + c.direct, 0);
+                      const groupWip = group.entries.reduce((s, c) => s + c.wip, 0);
+                      const groupExt = group.entries.reduce((s, c) => s + c.ext, 0);
+                      return (
+                        <div key={group.label} className="bg-white rounded-lg border overflow-hidden" style={{ borderColor: group.isStale ? '#fbbf24' : 'var(--card-border)' }}>
+                          {/* Card header */}
+                          <div className="flex items-center justify-between px-3 py-1.5 border-b" style={{ borderColor: 'var(--card-border)', background: group.label === 'Count 2' ? '#f5f3ff' : '#f8fafc' }}>
+                            <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: group.label === 'Count 2' ? '#7c3aed' : 'var(--muted)' }}>
+                              {group.label}
+                            </span>
+                            <span className="font-mono text-sm font-bold" style={{ color: group.isStale ? '#d97706' : undefined }}>
+                              {groupTotal}
+                              {group.isStale && (
+                                <span className="text-[9px] font-normal text-amber-500 ml-1" title={`Stored: ${group.storedQty}`}>
+                                  (stored: {group.storedQty})
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          {/* Counter rows */}
+                          <table className="w-full text-[11px]">
+                            <thead>
+                              <tr className="border-b" style={{ borderColor: 'var(--card-border)' }}>
+                                <th className="text-left pl-3 pr-2 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase">Counter</th>
+                                <th className="text-right px-2 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase">Part</th>
+                                <th className="text-right px-2 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase">WIP</th>
+                                <th className="text-right px-2 py-1 text-[9px] font-semibold text-amber-600 uppercase">Ext</th>
+                                <th className="text-right px-2 pr-3 py-1 text-[9px] font-semibold text-[var(--muted)] uppercase">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {group.entries.map((c, i) => (
+                                <tr key={i} className="border-b last:border-0" style={{ borderColor: 'var(--card-border)' }}>
+                                  <td className="pl-3 pr-2 py-1 font-medium">{c.counter}</td>
+                                  <td className="text-right px-2 py-1 font-mono">{c.direct || '—'}</td>
+                                  <td className="text-right px-2 py-1 font-mono text-[var(--muted)]">{c.wip || '—'}</td>
+                                  <td className="text-right px-2 py-1 font-mono text-amber-600">{c.ext || '—'}</td>
+                                  <td className="text-right px-2 pr-3 py-1 font-mono font-semibold">{c.total}</td>
+                                </tr>
+                              ))}
+                              {/* Totals row */}
+                              {group.entries.length > 1 && (
+                                <tr className="bg-slate-50/80">
+                                  <td className="pl-3 pr-2 py-1 text-[10px] font-semibold text-[var(--muted)] uppercase">Total</td>
+                                  <td className="text-right px-2 py-1 font-mono font-bold text-[var(--foreground)]">{groupDirect || '—'}</td>
+                                  <td className="text-right px-2 py-1 font-mono font-bold text-[var(--muted)]">{groupWip || '—'}</td>
+                                  <td className="text-right px-2 py-1 font-mono font-bold text-amber-600">{groupExt || '—'}</td>
+                                  <td className="text-right px-2 pr-3 py-1 font-mono font-bold">{groupTotal}</td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </td>
+          </tr>
+        );
+      })()}
     </>
   );
 }
