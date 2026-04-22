@@ -1397,7 +1397,14 @@ function DetailPanel({ result: r, breakdown, loadingBreakdown, reaggregating, on
                               )}
                             </span>
                           </div>
-                          <table className="w-full text-[11px]">
+                          <table className="w-full text-[11px]" style={{ tableLayout: 'fixed' }}>
+                            <colgroup>
+                              <col style={{ width: '38%' }} />
+                              <col style={{ width: '15.5%' }} />
+                              <col style={{ width: '15.5%' }} />
+                              <col style={{ width: '15.5%' }} />
+                              <col style={{ width: '15.5%' }} />
+                            </colgroup>
                             <thead>
                               <tr className="border-b" style={{ borderColor: 'var(--card-border)' }}>
                                 <th className="text-left pl-3 pr-2 py-1.5 text-[9px] font-semibold text-[var(--muted)] uppercase">Counter</th>
@@ -1408,15 +1415,18 @@ function DetailPanel({ result: r, breakdown, loadingBreakdown, reaggregating, on
                               </tr>
                             </thead>
                             <tbody>
-                              {group.entries.map((c, i) => (
-                                <tr key={i} className="border-b last:border-0" style={{ borderColor: 'var(--card-border)' }}>
-                                  <td className={`pl-3 pr-2 py-1.5 font-medium ${c.counter === 'Carried from Count 1' ? 'italic text-[var(--muted)]' : ''}`}>{c.counter}</td>
-                                  <td className="text-right px-2 py-1.5 font-mono">{c.direct || '—'}</td>
-                                  <td className="text-right px-2 py-1.5 font-mono text-[var(--muted)]">{c.wip || '—'}</td>
-                                  <td className="text-right px-2 py-1.5 font-mono text-amber-600">{c.ext || '—'}</td>
-                                  <td className="text-right px-2 pr-3 py-1.5 font-mono font-semibold">{c.total}</td>
-                                </tr>
-                              ))}
+                              {group.entries.map((c, i) => {
+                                const isCarried = c.counter === 'Carried from Count 1';
+                                return (
+                                  <tr key={i} className="border-b last:border-0" style={{ borderColor: 'var(--card-border)', opacity: isCarried ? 0.55 : 1 }}>
+                                    <td className={`pl-3 pr-2 py-1.5 font-medium truncate ${isCarried ? 'italic text-[var(--muted)] text-[10px]' : ''}`}>{c.counter}</td>
+                                    <td className={`text-right px-2 py-1.5 font-mono ${!isCarried && group.label === 'Count 2' && c.direct ? 'text-[var(--primary)] font-bold' : ''}`}>{c.direct || '—'}</td>
+                                    <td className={`text-right px-2 py-1.5 font-mono ${!isCarried && group.label === 'Count 2' && c.wip ? 'text-[var(--primary)] font-bold' : 'text-[var(--muted)]'}`}>{c.wip || '—'}</td>
+                                    <td className={`text-right px-2 py-1.5 font-mono ${!isCarried && group.label === 'Count 2' && c.ext ? 'text-amber-600 font-bold' : 'text-amber-600'}`}>{c.ext || '—'}</td>
+                                    <td className="text-right px-2 pr-3 py-1.5 font-mono font-semibold">{c.total}</td>
+                                  </tr>
+                                );
+                              })}
                               {group.entries.length > 1 && (
                                 <tr className="bg-slate-50/80">
                                   <td className="pl-3 pr-2 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase">Total</td>
