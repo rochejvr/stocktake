@@ -21,10 +21,13 @@ export async function GET(request: NextRequest) {
   let recordCounts: Record<string, number> = {};
 
   if (sessionIds.length > 0) {
+    // Count only physical scans (exclude auto-generated chain credit records)
+    // so the badge matches the displayed record list
     const { data: records } = await supabase
       .from('scan_records')
       .select('session_id')
-      .in('session_id', sessionIds);
+      .in('session_id', sessionIds)
+      .is('chained_from', null);
 
     if (records) {
       for (const r of records) {

@@ -14,7 +14,7 @@ export async function GET(
   // 1. Get the count_result to find stock_take_id, part_number, store_code + external qtys
   const { data: result, error } = await supabase
     .from('count_results')
-    .select('stock_take_id, part_number, store_code, count1_external_qty, count2_external_qty')
+    .select('stock_take_id, part_number, store_code, count1_direct_qty, count1_wip_qty, count1_external_qty, count2_direct_qty, count2_wip_qty, count2_external_qty')
     .eq('id', id)
     .single();
 
@@ -159,20 +159,29 @@ export async function GET(
     addToCount(r.session_id, r.user_name, creditedQty, 'wip');
   }
 
-  // External carry-over: if count2_external_qty is set but no count 2 external
-  // scans exist, the external was auto-carried from count 1 by end-counting.
-  // Show it in the breakdown so totals match count_results.
-  const c2ExtFromScans = [...countMap[2].values()].reduce((s, e) => s + e.ext, 0);
-  const storedC2Ext = result.count2_external_qty ?? 0;
-  if (storedC2Ext > 0 && c2ExtFromScans < storedC2Ext) {
-    const carriedQty = storedC2Ext - c2ExtFromScans;
-    const carriedEntry = countMap[2].get('Carried from Count 1');
-    if (carriedEntry) {
-      carriedEntry.ext += carriedQty;
-      carriedEntry.total += carriedQty;
-    } else {
-      countMap[2].set('Carried from Count 1', { counter: 'Carried from Count 1', direct: 0, wip: 0, ext: carriedQty, total: carriedQty });
-    }
+  // Per-channel carry-over: if count2 has stored values for a channel but no
+  // matching count 2 scans, the values were auto-carried from count 1 by
+  // end-counting. Show them in the breakdown so totals match count_results.
+  const c2FromScans = { direct: 0, wip: 0, ext: 0 };
+  for (const e of countMap[2].values()) {
+    c2FromScans.direct += e.direct;
+    c2FromScans.wip += e.wip;
+    c2FromScans.ext += e.ext;
+  }
+  const carried = {
+    direct: Math.max(0, (result.count2_direct_qty ?? 0) - c2FromScans.direct),
+    wip: Math.max(0, (result.count2_wip_qty ?? 0) - c2FromScans.wip),
+    ext: Math.max(0, (result.count2_external_qty ?? 0) - c2FromScans.ext),
+  };
+  const carriedTotal = carried.direct + carried.wip + carried.ext;
+  if (carriedTotal > 0) {
+    countMap[2].set('Carried from Count 1', {
+      counter: 'Carried from Count 1',
+      direct: carried.direct,
+      wip: carried.wip,
+      ext: carried.ext,
+      total: carriedTotal,
+    });
   }
 
   const toArray = (map: Map<string, Entry>) =>

@@ -212,15 +212,22 @@ export async function POST(
       recOffset += PAGE_SIZE;
     }
 
-    // Expand flaggedKeys: any XM that was directly scanned (or imported as external)
-    // in count 2 is an intentional recount action, regardless of its flag status.
+    // Expand flaggedKeys: any barcode scanned in count 2 is an intentional recount
+    // action. Direct/external scans add the part itself; WIP scans add each BOM
+    // component (so the recount covers all affected parts). Per-channel carry-over
+    // (below) prevents WIP contamination by preserving count 1 values for channels
+    // that weren't rescanned.
     if (isRecount && flaggedKeys) {
       for (const r of allRecords) {
         const store = r.store_code || '001';
-        const key = `${r.barcode}|${store}`;
-        const isWipCode = !r.chained_from && !!bomLookup[r.barcode.toLowerCase()];
-        if (!isWipCode) {
-          flaggedKeys.add(key);
+        if (r.chained_from) {
+          flaggedKeys.add(`${r.barcode}|${store}`);
+        } else if (bomLookup[r.barcode.toLowerCase()]) {
+          for (const comp of bomLookup[r.barcode.toLowerCase()]) {
+            flaggedKeys.add(`${comp.component_code}|${store}`);
+          }
+        } else {
+          flaggedKeys.add(`${r.barcode}|${store}`);
         }
       }
     }
@@ -295,16 +302,32 @@ export async function POST(
       aggregateRecords(c1Records, c1Direct, c1Wip, c1External, c1Totals);
     }
 
-    // External supplier stock is offsite and easily forgotten during recount.
-    // If a flagged item was physically recounted in count 2 but external was NOT
-    // re-imported, carry over the count 1 external value as the default.
-    // Counters can still explicitly override by re-importing external in count 2.
+    // Per-channel carry-over from count 1: if a channel (direct, wip, or external)
+    // has no count 2 scans but had count 1 data, carry it over. This prevents
+    // recounting one channel (e.g. WIP) from losing another (e.g. direct parts).
+    // Counters can override by explicitly scanning in count 2.
     if (flaggedKeys) {
       for (const key of flaggedKeys) {
-        const hasPhysicalC2 = (scanDirect[key] || 0) > 0 || (scanWip[key] || 0) > 0;
-        const c2External = scanExternal[key] || 0;
+        const c2Dir = scanDirect[key] || 0;
+        const c2Wip = scanWip[key] || 0;
+        const c2Ext = scanExternal[key] || 0;
+        const hasAnyC2 = c2Dir > 0 || c2Wip > 0 || c2Ext > 0;
+        if (!hasAnyC2) continue; // no count 2 activity at all — skip
+        // Carry direct from count 1 if not rescanned
+        const c1Dir = c1Direct[key] || 0;
+        if (c2Dir === 0 && c1Dir > 0) {
+          scanDirect[key] = c1Dir;
+          scanTotals[key] = (scanTotals[key] || 0) + c1Dir;
+        }
+        // Carry WIP from count 1 if not rescanned
+        const c1Wp = c1Wip[key] || 0;
+        if (c2Wip === 0 && c1Wp > 0) {
+          scanWip[key] = c1Wp;
+          scanTotals[key] = (scanTotals[key] || 0) + c1Wp;
+        }
+        // Carry external from count 1 if not re-imported
         const c1Ext = c1External[key] || 0;
-        if (hasPhysicalC2 && c2External === 0 && c1Ext > 0) {
+        if (c2Ext === 0 && c1Ext > 0) {
           scanExternal[key] = c1Ext;
           scanTotals[key] = (scanTotals[key] || 0) + c1Ext;
         }
