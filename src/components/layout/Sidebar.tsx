@@ -134,7 +134,7 @@ export function Sidebar() {
           className="text-white/20 text-[10px] overflow-hidden whitespace-nowrap hover:text-white/40 transition-colors cursor-pointer"
           style={{ opacity: expanded ? 1 : 0, transition: 'opacity 150ms' }}
         >
-          v0.4.2 · Apr 2026
+          v0.4.3 · Apr 2026
         </button>
       </div>
 
@@ -152,6 +152,14 @@ export function Sidebar() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 text-xs space-y-4">
+              <ChangelogSection title="v0.4.3 — Per-Channel Carry-Over + Slide Panel" items={[
+                'WIP scans in count 2 now bring BOM components into scope automatically',
+                'Per-channel carry-over: if direct/WIP/external not rescanned in count 2, count 1 values preserved',
+                'Detail panel slides in from right instead of expanding inline rows',
+                'Re-aggregate button syncs breakdown totals with stored values',
+                'Scan count badge now excludes auto-generated chain credit records',
+                'Carried-over channels shown with "Carried from Count 1" label in breakdown',
+              ]} />
               <ChangelogSection title="v0.4.2 — Channel-Aware Round Replacement" items={[
                 'Fix: WIP scans from a newer round no longer drop direct scans from an earlier round',
                 'Each contribution channel (direct, WIP/chain, external) tracks its own max round independently',
