@@ -231,12 +231,35 @@ export async function POST(
     // scanning a WIP for one flagged component must not give count2 values to
     // unflagged components in the same WIP.
     if (isRecount && flaggedKeys) {
+      // Collect newly added parts from direct scans (for chain expansion below)
+      const newParts = new Set<string>();
       for (const r of allRecords) {
         if (r.chained_from) continue; // skip auto-generated chain credits
         const store = r.store_code || '001';
         const isWipCode = !!bomLookup[r.barcode.toLowerCase()];
         if (!isWipCode) {
-          flaggedKeys.add(`${r.barcode}|${store}`);
+          const key = `${r.barcode}|${store}`;
+          if (!flaggedKeys.has(key)) newParts.add(r.barcode);
+          flaggedKeys.add(key);
+        }
+      }
+      // Expand chain descendants of directly-scanned parts (second pass).
+      // The initial chain expansion only covered recount_flagged items;
+      // parts added via direct scan need their chains expanded too.
+      if (newParts.size > 0) {
+        const { data: newChains } = await supabase
+          .from('component_chains')
+          .select('scanned_code, also_credit_code')
+          .in('scanned_code', [...newParts]);
+        if (newChains) {
+          for (const ch of newChains) {
+            // Add chain children for all stores where the parent was scanned
+            for (const r of allRecords) {
+              if (r.barcode === ch.scanned_code && !r.chained_from) {
+                flaggedKeys.add(`${ch.also_credit_code}|${r.store_code || '001'}`);
+              }
+            }
+          }
         }
       }
     }
