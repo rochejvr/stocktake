@@ -1392,7 +1392,7 @@ function DetailPanel({ result: r, showingCount2, breakdown, loadingBreakdown, re
                     {[
                       { label: 'Count 1', entries: breakdown.count1, storedQty: r.count1_qty, isStale: c1OutOfSync },
                       { label: 'Count 2', entries: breakdown.count2, storedQty: r.count2_qty, isStale: c2OutOfSync },
-                    ].filter(g => g.entries.length > 0).map(group => {
+                    ].filter(g => g.entries.length > 0 && g.storedQty !== null).map(group => {
                       const groupTotal = group.entries.reduce((s, c) => s + c.total, 0);
                       const groupDirect = group.entries.reduce((s, c) => s + c.direct, 0);
                       const groupWip = group.entries.reduce((s, c) => s + c.wip, 0);
