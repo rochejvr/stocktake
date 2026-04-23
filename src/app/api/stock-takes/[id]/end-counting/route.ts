@@ -44,6 +44,16 @@ export async function POST(
   const countNumber = isRecount ? 2 : 1;
   const countCol = isRecount ? 'count2_qty' : 'count1_qty';
 
+  // For re-aggregation in recount mode: clear ALL count2 values first so stale
+  // data from previous (possibly buggy) runs doesn't persist for out-of-scope items.
+  // Regular end-counting preserves count2 across rounds via split-batch upserts.
+  if (reaggregate && isRecount) {
+    await supabase
+      .from('count_results')
+      .update({ count2_qty: null, count2_direct_qty: null, count2_wip_qty: null, count2_external_qty: null })
+      .eq('stock_take_id', id);
+  }
+
   // 2. Get ALL scan sessions for this count number (no round_number filter).
   // Per-item round replacement is handled later: for each part, only the latest
   // round where it was scanned is used. This handles sessions scattered across

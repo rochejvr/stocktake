@@ -875,6 +875,7 @@ export default function ReconcilePage() {
       {/* Slide-in detail panel */}
       <DetailPanel
         result={expandedId ? results.find(r => r.id === expandedId) ?? null : null}
+        showingCount2={expandedId ? count2Rows.has(expandedId) : false}
         breakdown={expandedId ? breakdowns[expandedId] : undefined}
         loadingBreakdown={!!loadingBreakdown}
         reaggregating={reaggregating}
@@ -1220,8 +1221,9 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
 
 // ── Slide-in Detail Panel ────────────────────────────────────────────────────
 
-function DetailPanel({ result: r, breakdown, loadingBreakdown, reaggregating, onClose, onReaggregate }: {
+function DetailPanel({ result: r, showingCount2, breakdown, loadingBreakdown, reaggregating, onClose, onReaggregate }: {
   result: CountResult | null;
+  showingCount2: boolean;
   breakdown?: CounterBreakdown;
   loadingBreakdown: boolean;
   reaggregating: boolean;
@@ -1239,10 +1241,9 @@ function DetailPanel({ result: r, breakdown, loadingBreakdown, reaggregating, on
     }
   }, [isOpen, onClose]);
 
-  // Compute variance from accepted qty (if set), else best available count
-  const activeQty = r
-    ? (r.accepted_qty !== null ? r.accepted_qty : r.count2_qty !== null ? r.count2_qty : r.count1_qty)
-    : null;
+  // Compute variance from the active count (follows C1/C2 toggle in main table)
+  const useC2 = showingCount2 && r?.count2_qty !== null;
+  const activeQty = r ? (useC2 ? r.count2_qty : r.count1_qty) : null;
   const varQty = r && activeQty !== null ? activeQty - r.pastel_qty : null;
   const varianceColor = varQty == null ? 'var(--muted)' : varQty > 0 ? '#22c55e' : varQty < 0 ? 'var(--error)' : 'var(--muted)';
 
