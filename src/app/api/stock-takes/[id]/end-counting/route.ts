@@ -222,11 +222,11 @@ export async function POST(
     // unflagged components in the same WIP.
     if (isRecount && flaggedKeys) {
       for (const r of allRecords) {
+        if (r.chained_from) continue; // skip auto-generated chain credits
         const store = r.store_code || '001';
-        const key = `${r.barcode}|${store}`;
-        const isWipCode = !r.chained_from && !!bomLookup[r.barcode.toLowerCase()];
+        const isWipCode = !!bomLookup[r.barcode.toLowerCase()];
         if (!isWipCode) {
-          flaggedKeys.add(key);
+          flaggedKeys.add(`${r.barcode}|${store}`);
         }
       }
     }

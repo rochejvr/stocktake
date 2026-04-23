@@ -1239,10 +1239,11 @@ function DetailPanel({ result: r, breakdown, loadingBreakdown, reaggregating, on
     }
   }, [isOpen, onClose]);
 
-  // Compute values when panel is open
-  const varQty = r && r.count2_qty !== null ? r.count2_qty - r.pastel_qty
-    : r && r.count1_qty !== null ? r.count1_qty - r.pastel_qty
+  // Compute variance from accepted qty (if set), else best available count
+  const activeQty = r
+    ? (r.accepted_qty !== null ? r.accepted_qty : r.count2_qty !== null ? r.count2_qty : r.count1_qty)
     : null;
+  const varQty = r && activeQty !== null ? activeQty - r.pastel_qty : null;
   const varianceColor = varQty == null ? 'var(--muted)' : varQty > 0 ? '#22c55e' : varQty < 0 ? 'var(--error)' : 'var(--muted)';
 
   // Sync detection
