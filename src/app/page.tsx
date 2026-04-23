@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import { StockTakeClock } from '@/components/shared/StockTakeClock';
 import { ScanQRCard } from '@/components/shared/ScanQRCard';
 import {
-  Package, Users, AlertTriangle, CheckCircle, ScanLine, Plus,
-  ClipboardList, GitBranch, ArrowRight, Calendar, Play,
+  Package, Users, AlertTriangle, CheckCircle, ScanLine, Plus, Clock,
+  ClipboardList, GitBranch, ArrowRight, Calendar, Play, Eye,
 } from 'lucide-react';
 import type { StockTake, StockTakeStats } from '@/types';
 import Link from 'next/link';
@@ -28,17 +28,19 @@ const NEXT_STATUS: Record<string, { target: string; label: string; confirm: stri
 export default function OverviewPage() {
   const [stockTake, setStockTake] = useState<StockTake | null>(null);
   const [stats, setStats] = useState<StockTakeStats | null>(null);
+  const [allStockTakes, setAllStockTakes] = useState<StockTake[]>([]);
   const [loading, setLoading] = useState(true);
   const [advancing, setAdvancing] = useState(false);
 
   useEffect(() => {
-    fetch('/api/stock-takes/active')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data?.stockTake) setStockTake(data.stockTake);
-        if (data?.stats) setStats(data.stats);
-      })
-      .finally(() => setLoading(false));
+    Promise.all([
+      fetch('/api/stock-takes/active').then(r => r.ok ? r.json() : null),
+      fetch('/api/stock-takes').then(r => r.ok ? r.json() : []),
+    ]).then(([activeData, allData]) => {
+      if (activeData?.stockTake) setStockTake(activeData.stockTake);
+      if (activeData?.stats) setStats(activeData.stats);
+      if (Array.isArray(allData)) setAllStockTakes(allData);
+    }).finally(() => setLoading(false));
   }, []);
 
   const isCounting = stockTake?.status === 'counting' || stockTake?.status === 'recount';
@@ -78,7 +80,7 @@ export default function OverviewPage() {
         )}
 
         {!loading && !stockTake && (
-          <div className="fade-in">
+          <div className="space-y-6 fade-in">
             {/* Empty state hero */}
             <div className="card-elevated p-12 text-center">
               <div className="w-16 h-16 rounded-2xl mx-auto mb-6 flex items-center justify-center" style={{ background: 'var(--primary-light)' }}>
@@ -88,13 +90,14 @@ export default function OverviewPage() {
                 No Active Stock Take
               </h1>
               <p className="text-[var(--muted)] text-sm mb-8 max-w-md mx-auto">
-                Create a new stock take to import Pastel inventory, map your BOMs, and begin the quarterly count process.
+                Create a new stock take to import Pastel inventory, map your BOMs, and begin the count process.
               </p>
               <Link href="/setup" className="btn-primary inline-flex">
                 <Plus size={16} />
                 Create Stock Take
               </Link>
             </div>
+            <StockTakeHistory stockTakes={allStockTakes} activeId={null} />
           </div>
         )}
 
@@ -202,6 +205,8 @@ export default function OverviewPage() {
                 <QuickAction href="/reconcile" label="Reconcile" description="Variance analysis" icon={<CheckCircle size={20} />} />
               </div>
             </div>
+
+            <StockTakeHistory stockTakes={allStockTakes} activeId={stockTake.id} />
           </div>
         )}
       </div>
@@ -277,6 +282,43 @@ function StatusPipeline({ status }: { status: string }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function StockTakeHistory({ stockTakes, activeId }: { stockTakes: StockTake[]; activeId: string | null }) {
+  const completed = stockTakes.filter(st => st.status === 'complete');
+  if (completed.length === 0) return null;
+
+  return (
+    <div>
+      <h2 className="section-title mb-3">Stock Take History</h2>
+      <div className="space-y-2">
+        {completed.map(st => (
+          <Link
+            key={st.id}
+            href={`/reconcile?stockTakeId=${st.id}`}
+            className="card card-interactive px-4 py-3 flex items-center gap-4 group"
+          >
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: '#f0fdf4' }}>
+              <CheckCircle size={18} className="text-emerald-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)' }}>{st.reference}</span>
+                {st.name && <span className="text-xs text-[var(--muted)] truncate">{st.name}</span>}
+              </div>
+              <div className="text-[11px] text-[var(--muted)] mt-0.5">
+                {st.completed_at ? `Completed ${format(new Date(st.completed_at), 'dd MMM yyyy')}` : 'Completed'}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-[var(--muted)] group-hover:text-[var(--primary)] transition-colors">
+              <Eye size={14} />
+              <span className="text-[11px] font-medium">View</span>
+            </div>
+          </Link>
+        ))}
       </div>
     </div>
   );

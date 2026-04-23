@@ -387,6 +387,35 @@ export async function POST(
     return NextResponse.json({ error: 'No inventory data found' }, { status: 400 });
   }
 
+  // 3b. Fetch previous completed stock take's accepted quantities for reference
+  const prevLookup: Record<string, { qty: number | null; pct: number | null }> = {};
+  const { data: prevSt } = await supabase
+    .from('stock_takes')
+    .select('id')
+    .eq('status', 'complete')
+    .lt('created_at', st.created_at)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (prevSt) {
+    let prevResults: Array<{ part_number: string; store_code: string; accepted_qty: number | null; variance_pct: number | null }> = [];
+    let prevOffset = 0;
+    while (true) {
+      const { data: prevPage } = await supabase
+        .from('count_results')
+        .select('part_number, store_code, accepted_qty, variance_pct')
+        .eq('stock_take_id', prevSt.id)
+        .range(prevOffset, prevOffset + PAGE_SIZE - 1);
+      if (!prevPage || prevPage.length === 0) break;
+      prevResults = prevResults.concat(prevPage);
+      if (prevPage.length < PAGE_SIZE) break;
+      prevOffset += PAGE_SIZE;
+    }
+    for (const r of prevResults) {
+      prevLookup[`${r.part_number}|${r.store_code}`] = { qty: r.accepted_qty, pct: r.variance_pct };
+    }
+  }
+
   // 4. Build or update count_results
   let flaggedCount = 0;
   // Two upsert batches to avoid schema padding wiping existing count2 values for
@@ -412,6 +441,7 @@ export async function POST(
       const isInScope = flaggedKeys?.has(key) ?? false;
       const c1Total = c1Totals[key] ?? null;
       const isUncountedWithStock = c1Total === null && pastelQty > 0;
+      const prev = prevLookup[key];
       const baseRow = {
         stock_take_id: id,
         part_number: inv.part_number,
@@ -424,6 +454,8 @@ export async function POST(
         count1_direct_qty: c1Direct[key] ?? null,
         count1_wip_qty: c1Wip[key] ?? null,
         count1_external_qty: c1External[key] ?? null,
+        prev_stock_take_qty: prev?.qty ?? null,
+        prev_variance_pct: prev?.pct ?? null,
       };
 
       if (isInScope) {
@@ -503,6 +535,7 @@ export async function POST(
     const wipCol = isRecount ? 'count2_wip_qty' : 'count1_wip_qty';
     const externalCol = isRecount ? 'count2_external_qty' : 'count1_external_qty';
 
+    const prev = prevLookup[key];
     const row: Record<string, unknown> = {
       stock_take_id: id,
       part_number: inv.part_number,
@@ -517,6 +550,8 @@ export async function POST(
       [externalCol]: scanExternal[key] ?? null,
       variance_qty: varianceQty,
       variance_pct: variancePct,
+      prev_stock_take_qty: prev?.qty ?? null,
+      prev_variance_pct: prev?.pct ?? null,
     };
     if (!isRecount) {
       row.recount_flagged = recountFlagged;

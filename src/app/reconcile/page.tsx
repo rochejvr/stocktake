@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronUp, Filter, X,
+  AlertTriangle, Check, ChevronDown, ChevronUp, Filter, X, ArrowLeft,
   Search, ArrowUpDown, CheckCircle, XCircle, Flag, Printer, ListChecks,
   EyeOff, Eye, RotateCcw, Calculator,
 } from 'lucide-react';
@@ -43,7 +45,15 @@ function saveExcludedIds(stockTakeId: string, ids: Set<string>) {
   try { localStorage.setItem(EXCLUDED_DEVIATION_KEY(stockTakeId), JSON.stringify([...ids])); } catch { /* noop */ }
 }
 
-export default function ReconcilePage() {
+// Wrap in Suspense for useSearchParams (required by Next.js)
+export default function ReconcilePageWrapper() {
+  return <Suspense><ReconcilePageInner /></Suspense>;
+}
+
+function ReconcilePageInner() {
+  const searchParams = useSearchParams();
+  const specificStockTakeId = searchParams.get('stockTakeId');
+
   const [stockTake, setStockTake] = useState<StockTake | null>(null);
   const [results, setResults] = useState<CountResult[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,31 +70,34 @@ export default function ReconcilePage() {
   const [recountWips, setRecountWips] = useState<Array<{ part_number: string; description: string; store_code: string; pastel_qty: number; count1_qty: number | null; count2_qty: number | null }>>([]);
   const [recountSelection, setRecountSelection] = useState<Set<string>>(new Set());
   const [loadingRecount, setLoadingRecount] = useState(false);
-  // Per-row count selection: which count to show (1 or 2). Only rows with count2 can be toggled.
   const [count2Rows, setCount2Rows] = useState<Set<string>>(new Set());
-  // Per-counter breakdown for expanded rows (fetched on-demand)
   const [breakdowns, setBreakdowns] = useState<Record<string, CounterBreakdown>>({});
   const [loadingBreakdown, setLoadingBreakdown] = useState<string | null>(null);
-  // IDs excluded from deviation calc (user can toggle per row; does NOT affect export)
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
+
+  const isReadOnly = stockTake?.status === 'complete';
 
   const fetchData = useCallback(async () => {
     try {
-      const stRes = await fetch('/api/stock-takes/active');
-      const stData = await stRes.json();
-      const st: StockTake | null = stData?.stockTake ?? null;
+      let st: StockTake | null = null;
+      if (specificStockTakeId) {
+        // Load specific stock take by ID (for viewing history)
+        const res = await fetch(`/api/stock-takes`);
+        const all = await res.json();
+        st = (Array.isArray(all) ? all : []).find((s: StockTake) => s.id === specificStockTakeId) ?? null;
+      } else {
+        const stRes = await fetch('/api/stock-takes/active');
+        const stData = await stRes.json();
+        st = stData?.stockTake ?? null;
+      }
       setStockTake(st);
 
       if (st) {
-        // Load excluded IDs for this stock take from localStorage
         setExcludedIds(loadExcludedIds(st.id));
-        // Always fetch all results — filter client-side for instant tab switching
         const crRes = await fetch(`/api/count-results?stockTakeId=${st.id}&filter=all`);
         const crData = await crRes.json();
         const arr: CountResult[] = Array.isArray(crData) ? crData : [];
         setResults(arr);
-        // Pre-populate C1/C2 toggle: default to C2 when recount variance is smaller
-        // (closer to Pastel = more accurate physical count). User can toggle manually.
         const autoC2 = new Set<string>();
         for (const r of arr) {
           if (shouldPreferCount2(r)) autoC2.add(r.id);
@@ -93,7 +106,7 @@ export default function ReconcilePage() {
       }
     } catch { /* ignore */ }
     finally { setLoading(false); }
-  }, []);
+  }, [specificStockTakeId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -340,7 +353,7 @@ export default function ReconcilePage() {
     });
   };
 
-  const isReviewable = stockTake?.status === 'reviewing' || stockTake?.status === 'recount';
+  const isReviewable = !isReadOnly && (stockTake?.status === 'reviewing' || stockTake?.status === 'recount');
   const isRecount = stockTake?.status === 'recount';
   const [reopening, setReopening] = useState(false);
   const [reaggregating, setReaggregating] = useState(false);
@@ -511,6 +524,17 @@ export default function ReconcilePage() {
 
         {!loading && results.length > 0 && (
           <div className="space-y-6 fade-in">
+            {/* Read-only banner */}
+            {isReadOnly && (
+              <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200 text-sm text-emerald-800">
+                <CheckCircle size={16} className="flex-shrink-0 text-emerald-500" />
+                <span>Viewing completed stock take: <strong>{stockTake?.reference}</strong></span>
+                <Link href="/" className="ml-auto flex items-center gap-1 text-emerald-700 hover:text-emerald-900 font-medium text-xs">
+                  <ArrowLeft size={12} /> Back to Dashboard
+                </Link>
+              </div>
+            )}
+
             {/* Header */}
             <div className="flex items-center justify-between">
               <div>
@@ -1334,6 +1358,28 @@ function DetailPanel({ result: r, showingCount2, breakdown, loadingBreakdown, re
                   </div>
                 ))}
               </div>
+
+              {/* Previous Stock Take reference */}
+              {r.prev_stock_take_qty !== null && (() => {
+                const currentQty = r.accepted_qty ?? (useC2 ? r.count2_qty : r.count1_qty);
+                const delta = currentQty !== null ? currentQty - r.prev_stock_take_qty : null;
+                return (
+                  <div className="flex items-center gap-3 px-3 py-2 rounded-lg border" style={{ borderColor: 'var(--card-border)', background: '#f0fdf4' }}>
+                    <div className="flex-1">
+                      <div className="text-[9px] font-semibold text-emerald-700 uppercase tracking-wide">Previous Stock Take</div>
+                      <div className="font-mono text-sm font-bold mt-0.5">{r.prev_stock_take_qty}</div>
+                    </div>
+                    {delta !== null && delta !== 0 && (
+                      <div className="text-right">
+                        <div className="text-[9px] text-[var(--muted)] uppercase">Change</div>
+                        <div className={`font-mono text-sm font-bold ${delta > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                          {delta > 0 ? '+' : ''}{delta}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Count History — compact summary */}
               <div>
