@@ -122,14 +122,16 @@ export async function POST(
         totals[key] = (totals[key] || 0) + qty;
       } else if (r.chained_from) {
         const key = `${r.barcode}|${store}`;
-        if (!isLatestRound(key, maxRoundWip, r.session_id)) continue;
+        const sourceKey = `${r.chained_from}|${store}`;
+        if (!isLatestRound(sourceKey, maxRoundWip, r.session_id)) continue;
         if (!isAllowed(key)) continue;
         wip[key] = (wip[key] || 0) + qty;
         totals[key] = (totals[key] || 0) + qty;
       } else if (bomLookup[r.barcode.toLowerCase()]) {
+        const wipKey = `${r.barcode}|${store}`;
+        if (!isLatestRound(wipKey, maxRoundWip, r.session_id)) continue;
         for (const comp of bomLookup[r.barcode.toLowerCase()]) {
           const compKey = `${comp.component_code}|${store}`;
-          if (!isLatestRound(compKey, maxRoundWip, r.session_id)) continue;
           if (!isAllowed(compKey)) continue;
           const compQty = qty * comp.qty_per_wip;
           wip[compKey] = (wip[compKey] || 0) + compQty;
@@ -246,15 +248,15 @@ export async function POST(
           const key = `${r.barcode}|${store}`;
           maxRoundExternal.set(key, Math.max(maxRoundExternal.get(key) ?? 0, round));
         } else if (r.chained_from) {
-          // Chain credits share the WIP channel
-          const key = `${r.barcode}|${store}`;
-          maxRoundWip.set(key, Math.max(maxRoundWip.get(key) ?? 0, round));
+          // Chain credit: key by SOURCE (chained_from) so different chain parents
+          // don't invalidate each other across rounds
+          const sourceKey = `${r.chained_from}|${store}`;
+          maxRoundWip.set(sourceKey, Math.max(maxRoundWip.get(sourceKey) ?? 0, round));
         } else if (bomLookup[r.barcode.toLowerCase()]) {
-          // WIP scan: each BOM component is a target in the WIP channel
-          for (const comp of bomLookup[r.barcode.toLowerCase()]) {
-            const compKey = `${comp.component_code}|${store}`;
-            maxRoundWip.set(compKey, Math.max(maxRoundWip.get(compKey) ?? 0, round));
-          }
+          // WIP scan: key by SOURCE WIP barcode (not per-component target) so
+          // different WIPs contributing to the same component don't filter each other
+          const wipKey = `${r.barcode}|${store}`;
+          maxRoundWip.set(wipKey, Math.max(maxRoundWip.get(wipKey) ?? 0, round));
         } else {
           // Direct scan
           const key = `${r.barcode}|${store}`;

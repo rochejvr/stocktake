@@ -84,12 +84,13 @@ export async function GET(
     }
   }
 
-  // 6. Compute max round for THIS part per channel across count 2 contribution types.
-  // Channel-aware: a WIP contribution in round N+1 does NOT filter out direct scans
-  // from round N. Each channel tracks its own max round independently.
+  // 6. Compute max round per SOURCE for count 2 contribution types.
+  // Channel-aware + source-aware: round replacement is per-source (WIP barcode or
+  // chain parent), NOT per-target component. Different WIPs contributing to the same
+  // part in different rounds should ALL be included.
   let maxC2RoundDirect = 0;
-  let maxC2RoundWip = 0;
   let maxC2RoundExt = 0;
+  const maxC2RoundPerSource: Record<string, number> = {};
   if (directRecords) {
     for (const r of directRecords) {
       const sess = sessionMap.get(r.session_id);
@@ -97,7 +98,8 @@ export async function GET(
         if (r.source === 'external') {
           maxC2RoundExt = Math.max(maxC2RoundExt, sess.roundNumber);
         } else if (r.chained_from) {
-          maxC2RoundWip = Math.max(maxC2RoundWip, sess.roundNumber);
+          const srcKey = r.chained_from.toLowerCase();
+          maxC2RoundPerSource[srcKey] = Math.max(maxC2RoundPerSource[srcKey] ?? 0, sess.roundNumber);
         } else {
           maxC2RoundDirect = Math.max(maxC2RoundDirect, sess.roundNumber);
         }
@@ -107,7 +109,8 @@ export async function GET(
   for (const r of wipRecords) {
     const sess = sessionMap.get(r.session_id);
     if (sess?.countNumber === 2) {
-      maxC2RoundWip = Math.max(maxC2RoundWip, sess.roundNumber);
+      const srcKey = r.barcode.toLowerCase();
+      maxC2RoundPerSource[srcKey] = Math.max(maxC2RoundPerSource[srcKey] ?? 0, sess.roundNumber);
     }
   }
 
@@ -115,16 +118,19 @@ export async function GET(
   type Entry = { counter: string; direct: number; wip: number; ext: number; total: number };
   const countMap: Record<1 | 2, Map<string, Entry>> = { 1: new Map(), 2: new Map() };
 
-  function addToCount(sessionId: string, userName: string, qty: number, type: 'direct' | 'wip' | 'ext') {
+  function addToCount(sessionId: string, userName: string, qty: number, type: 'direct' | 'wip' | 'ext', sourceKey?: string) {
     const sess = sessionMap.get(sessionId);
     if (!sess) return;
     const cn = sess.countNumber as 1 | 2;
-    // For count 2: only include records from the latest round for THIS channel
     if (cn === 2) {
-      const channelMax = type === 'direct' ? maxC2RoundDirect
-                       : type === 'ext' ? maxC2RoundExt
-                       : maxC2RoundWip;
-      if (channelMax > 0 && sess.roundNumber < channelMax) return;
+      if (type === 'wip' && sourceKey) {
+        // WIP/chain: check per-source max round
+        const maxRound = maxC2RoundPerSource[sourceKey] ?? 0;
+        if (maxRound > 0 && sess.roundNumber < maxRound) return;
+      } else {
+        const channelMax = type === 'direct' ? maxC2RoundDirect : maxC2RoundExt;
+        if (channelMax > 0 && sess.roundNumber < channelMax) return;
+      }
     }
     const map = countMap[cn];
     if (!map.has(userName)) {
@@ -138,25 +144,24 @@ export async function GET(
   // Direct scans (non-chained, non-external)
   if (directRecords) {
     for (const r of directRecords) {
-      if (r.chained_from) continue; // handled separately
+      if (r.chained_from) continue;
       const type = r.source === 'external' ? 'ext' : 'direct';
       addToCount(r.session_id, r.user_name, Number(r.quantity), type);
     }
   }
 
-  // Chain credits are already included in directRecords query (same barcode)
-  // but marked with chained_from — count as WIP
+  // Chain credits — count as WIP, keyed by source (chained_from) for round check
   if (directRecords) {
     for (const r of directRecords) {
       if (!r.chained_from) continue;
-      addToCount(r.session_id, r.user_name, Number(r.quantity), 'wip');
+      addToCount(r.session_id, r.user_name, Number(r.quantity), 'wip', r.chained_from.toLowerCase());
     }
   }
 
-  // WIP scan contributions (scanner scanned a WIP code, which exploded into this part)
+  // WIP scan contributions — keyed by source WIP barcode for round check
   for (const r of wipRecords) {
     const creditedQty = Number(r.quantity) * r.qty_per_wip;
-    addToCount(r.session_id, r.user_name, creditedQty, 'wip');
+    addToCount(r.session_id, r.user_name, creditedQty, 'wip', r.barcode.toLowerCase());
   }
 
   // Per-channel carry-over: if count2 has stored values for a channel but no
