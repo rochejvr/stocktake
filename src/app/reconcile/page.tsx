@@ -725,7 +725,13 @@ export default function ReconcilePage() {
                   <StatTile label="Total" value={totalParts} />
                   <StatTile label="Flagged" value={flaggedParts} color={flaggedParts > 0 ? '#f59e0b' : undefined} />
                   <StatTile label="Accepted" value={acceptedParts} color={acceptedParts > 0 ? '#10b981' : undefined} />
-                  <StatTile label="Remaining" value={results.filter(r => r.count1_qty !== null && !r.deviation_accepted).length} color={results.filter(r => r.count1_qty !== null && !r.deviation_accepted).length === 0 ? '#10b981' : undefined} />
+                  {(() => {
+                    const rem = results.filter(r => {
+                      const isZeroZero = r.pastel_qty === 0 && (r.count1_qty === null || r.count1_qty === 0);
+                      return !isZeroZero && !r.deviation_accepted;
+                    }).length;
+                    return <StatTile label="Remaining" value={rem} color={rem === 0 ? '#10b981' : undefined} />;
+                  })()}
                 </div>
               </div>
             </div>
