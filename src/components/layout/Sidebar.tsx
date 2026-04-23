@@ -134,7 +134,7 @@ export function Sidebar() {
           className="text-white/20 text-[10px] overflow-hidden whitespace-nowrap hover:text-white/40 transition-colors cursor-pointer"
           style={{ opacity: expanded ? 1 : 0, transition: 'opacity 150ms' }}
         >
-          v0.4.3 · Apr 2026
+          v0.5.0 · Apr 2026
         </button>
       </div>
 
@@ -152,6 +152,12 @@ export function Sidebar() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 text-xs space-y-4">
+              <ChangelogSection title="v0.5.0 — Stock Take History + Previous Count Reference" items={[
+                'Dashboard shows completed stock takes with link to read-only reconciliation',
+                'Detail panel shows previous stock take count and delta',
+                'Read-only mode for completed stock takes (green banner, no actions)',
+                'End-counting populates prev_stock_take_qty from last completed stock take',
+              ]} />
               <ChangelogSection title="v0.4.3 — Per-Channel Carry-Over + Slide Panel" items={[
                 'WIP scans in count 2 now bring BOM components into scope automatically',
                 'Per-channel carry-over: if direct/WIP/external not rescanned in count 2, count 1 values preserved',
