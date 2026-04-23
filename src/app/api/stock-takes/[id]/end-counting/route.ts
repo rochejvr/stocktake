@@ -212,22 +212,19 @@ export async function POST(
       recOffset += PAGE_SIZE;
     }
 
-    // Expand flaggedKeys: any barcode scanned in count 2 is an intentional recount
-    // action. Direct/external scans add the part itself; WIP scans add each BOM
-    // component (so the recount covers all affected parts). Per-channel carry-over
-    // (below) prevents WIP contamination by preserving count 1 values for channels
-    // that weren't rescanned.
+    // Expand flaggedKeys: any XM that was directly scanned (or imported as external)
+    // in count 2 is an intentional recount action, regardless of its flag status.
+    // WIP scans do NOT expand scope — their contributions only flow to components
+    // already in flaggedKeys via isAllowed(). This prevents WIP contamination:
+    // scanning a WIP for one flagged component must not give count2 values to
+    // unflagged components in the same WIP.
     if (isRecount && flaggedKeys) {
       for (const r of allRecords) {
         const store = r.store_code || '001';
-        if (r.chained_from) {
-          flaggedKeys.add(`${r.barcode}|${store}`);
-        } else if (bomLookup[r.barcode.toLowerCase()]) {
-          for (const comp of bomLookup[r.barcode.toLowerCase()]) {
-            flaggedKeys.add(`${comp.component_code}|${store}`);
-          }
-        } else {
-          flaggedKeys.add(`${r.barcode}|${store}`);
+        const key = `${r.barcode}|${store}`;
+        const isWipCode = !r.chained_from && !!bomLookup[r.barcode.toLowerCase()];
+        if (!isWipCode) {
+          flaggedKeys.add(key);
         }
       }
     }
