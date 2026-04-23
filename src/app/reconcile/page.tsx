@@ -524,15 +524,26 @@ export default function ReconcilePage() {
               </div>
               <div className="flex items-center gap-2">
                 {stockTake?.status === 'reviewing' && (
-                  <button
-                    onClick={handleReopenCounting}
-                    disabled={reopening}
-                    className="h-9 px-4 rounded-lg border text-sm font-semibold flex items-center gap-1.5 transition-colors hover:bg-orange-50 cursor-pointer disabled:opacity-50"
-                    style={{ borderColor: 'var(--error)', color: 'var(--error)' }}
-                  >
-                    <RotateCcw size={14} />
-                    {reopening ? 'Reopening...' : 'Reopen Counting'}
-                  </button>
+                  <>
+                    <button
+                      onClick={handleReaggregate}
+                      disabled={reaggregating}
+                      className="h-9 px-4 rounded-lg border text-sm font-semibold flex items-center gap-1.5 transition-colors hover:bg-blue-50 cursor-pointer disabled:opacity-50"
+                      style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }}
+                    >
+                      <RotateCcw size={14} className={reaggregating ? 'animate-spin' : ''} />
+                      {reaggregating ? 'Re-aggregating...' : 'Re-aggregate'}
+                    </button>
+                    <button
+                      onClick={handleReopenCounting}
+                      disabled={reopening}
+                      className="h-9 px-4 rounded-lg border text-sm font-semibold flex items-center gap-1.5 transition-colors hover:bg-orange-50 cursor-pointer disabled:opacity-50"
+                      style={{ borderColor: 'var(--error)', color: 'var(--error)' }}
+                    >
+                      <RotateCcw size={14} />
+                      {reopening ? 'Reopening...' : 'Reopen Counting'}
+                    </button>
+                  </>
                 )}
                 {flaggedParts > 0 && (
                   <button
