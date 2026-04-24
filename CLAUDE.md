@@ -2,7 +2,7 @@
 
 # Stock Take — Xavant Technology
 
-Monthly stock take management app (v0.4.1). Import Pastel inventory → department checklist sign-offs → mobile barcode scanning → variance reconciliation → Pastel adjustment export.
+Monthly stock take management app (v0.5.1). Import Pastel inventory → department checklist sign-offs → mobile barcode scanning → variance reconciliation → Pastel adjustment export.
 
 ## Quick Start
 

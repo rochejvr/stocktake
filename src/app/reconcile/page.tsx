@@ -1186,7 +1186,23 @@ function ResultRow({ result: r, anyHasCount2, showingCount2, isReviewable, expan
         {/* Status */}
         <td className="px-2 py-2 text-center">
           {r.deviation_accepted === true ? (
-            <CheckCircle size={16} className="inline text-green-500" />
+            <div
+              className="flex flex-col items-center gap-0.5"
+              title={r.accepted_qty !== activeQty
+                ? `Accepted: ${r.accepted_qty} (active count is ${activeQty})`
+                : `Accepted: ${r.accepted_qty}`}
+            >
+              <CheckCircle size={16} className={
+                r.accepted_qty !== activeQty ? "text-amber-500" : "text-green-500"
+              } />
+              <span className={`text-[9px] font-mono font-bold leading-none px-1 py-0.5 rounded ${
+                r.accepted_qty !== activeQty
+                  ? 'bg-amber-50 text-amber-600'
+                  : 'text-green-600/60'
+              }`}>
+                {r.accepted_qty}
+              </span>
+            </div>
           ) : r.recount_flagged ? (
             <AlertTriangle size={16} className="inline text-amber-500" />
           ) : varQty === 0 || varQty === null ? (
