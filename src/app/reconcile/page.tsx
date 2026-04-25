@@ -244,7 +244,11 @@ function ReconcilePageInner() {
   // Stats
   const totalParts = results.length;
   const flaggedParts = results.filter(r => r.recount_flagged).length;
-  const uncountedParts = results.filter(r => r.count1_qty === null).length;
+  const uncountedParts = results.filter(r => {
+    if (r.count1_qty !== null) return false;
+    if (hideZeroZero && r.pastel_qty === 0) return false;
+    return true;
+  }).length;
   const acceptedParts = results.filter(r => r.deviation_accepted === true).length;
   const remainingCount = useMemo(() =>
     results.filter(r => {
