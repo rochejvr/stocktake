@@ -60,8 +60,7 @@ function ReconcilePageInner() {
   const [flaggedFilter, setFlaggedFilter] = useState<TileFilter>('off');
   const [acceptedFilter, setAcceptedFilter] = useState<TileFilter>('off');
   const [remainingFilter, setRemainingFilter] = useState<TileFilter>('off');
-  const [varianceOnly, setVarianceOnly] = useState(false);
-  const [uncountedOnly, setUncountedOnly] = useState(false);
+  const [uncountedFilter, setUncountedFilter] = useState<TileFilter>('off');
   const [storeFilter, setStoreFilter] = useState<'all' | '001' | '002'>('all');
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<SortField>('part_number');
@@ -196,9 +195,9 @@ function ReconcilePageInner() {
       if (remainingFilter === 'include' && !isRemaining) return false;
       if (remainingFilter === 'exclude' && isRemaining) return false;
     }
-    // Toggle filters
-    if (varianceOnly && (r.variance_qty === 0 || r.variance_qty === null)) return false;
-    if (uncountedOnly && r.count1_qty !== null) return false;
+    // Uncounted tile filter
+    if (uncountedFilter === 'include' && r.count1_qty !== null) return false;
+    if (uncountedFilter === 'exclude' && r.count1_qty === null) return false;
     // Store filter
     if (storeFilter !== 'all' && r.store_code !== storeFilter) return false;
     // Zero/zero filter
@@ -770,11 +769,14 @@ function ReconcilePageInner() {
                 </div>
 
                 {/* Secondary counts — clickable 3-way filters */}
-                <div className="lg:w-[44%] lg:flex-shrink-0 border-t lg:border-t-0 lg:border-l grid grid-cols-4" style={{ borderColor: 'var(--card-border)' }}>
+                <div className="lg:w-[52%] lg:flex-shrink-0 border-t lg:border-t-0 lg:border-l grid grid-cols-5" style={{ borderColor: 'var(--card-border)' }}>
                   <FilterTile label="Total" value={totalParts} />
                   <FilterTile label="Flagged" value={flaggedParts}
                     color={flaggedParts > 0 ? '#f59e0b' : undefined}
                     filterState={flaggedFilter} onCycleFilter={() => cycleTileFilter(setFlaggedFilter)} />
+                  <FilterTile label="Uncounted" value={uncountedParts}
+                    color={uncountedParts > 0 ? '#6366f1' : undefined}
+                    filterState={uncountedFilter} onCycleFilter={() => cycleTileFilter(setUncountedFilter)} />
                   <FilterTile label="Accepted" value={acceptedParts}
                     color={acceptedParts > 0 ? '#10b981' : undefined}
                     filterState={acceptedFilter} onCycleFilter={() => cycleTileFilter(setAcceptedFilter)} />
@@ -787,31 +789,6 @@ function ReconcilePageInner() {
 
             {/* Filters + Search */}
             <div className="flex flex-wrap items-center gap-3">
-              {/* Toggle pills for non-tile filters */}
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => setVarianceOnly(prev => !prev)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all"
-                  style={{
-                    borderColor: varianceOnly ? 'var(--primary)' : 'var(--card-border)',
-                    background: varianceOnly ? 'var(--primary-light)' : 'transparent',
-                    color: varianceOnly ? 'var(--primary)' : 'var(--muted)',
-                  }}
-                >
-                  Variance
-                </button>
-                <button
-                  onClick={() => setUncountedOnly(prev => !prev)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all"
-                  style={{
-                    borderColor: uncountedOnly ? 'var(--primary)' : 'var(--card-border)',
-                    background: uncountedOnly ? 'var(--primary-light)' : 'transparent',
-                    color: uncountedOnly ? 'var(--primary)' : 'var(--muted)',
-                  }}
-                >
-                  Uncounted
-                </button>
-              </div>
               <div className="flex items-center gap-1 bg-white rounded-lg border p-1" style={{ borderColor: 'var(--card-border)' }}>
                 {(['all', '001', '002'] as const).map(s => (
                   <button
