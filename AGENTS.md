@@ -2,7 +2,7 @@
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 
-# Stock Take App — Agent Context (v0.5.1)
+# Stock Take App — Agent Context (v0.5.2)
 
 - **Stack**: Next.js 16.2.0 + React 19 + TypeScript 5 + Tailwind CSS 4 + Supabase
 - **Port**: 3004

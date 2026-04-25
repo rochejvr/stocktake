@@ -4,14 +4,14 @@ import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronUp, Filter, X, ArrowLeft,
+  AlertTriangle, Check, ChevronDown, ChevronUp, X, ArrowLeft,
   Search, ArrowUpDown, CheckCircle, XCircle, Flag, Printer, ListChecks,
   EyeOff, Eye, RotateCcw, Calculator,
 } from 'lucide-react';
 import type { StockTake, CountResult } from '@/types';
 import { STORE_LABELS, TIER_LABELS, RECOUNT_THRESHOLDS, RECOUNT_ZAR_THRESHOLD } from '@/lib/constants';
 
-type FilterType = 'all' | 'flagged' | 'variance' | 'uncounted' | 'accepted';
+type TileFilter = 'off' | 'include' | 'exclude';
 type SortField = 'part_number' | 'variance_pct' | 'variance_qty' | 'tier' | 'pastel_qty';
 type SortDir = 'asc' | 'desc';
 
@@ -57,7 +57,11 @@ function ReconcilePageInner() {
   const [stockTake, setStockTake] = useState<StockTake | null>(null);
   const [results, setResults] = useState<CountResult[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<FilterType>('all');
+  const [flaggedFilter, setFlaggedFilter] = useState<TileFilter>('off');
+  const [acceptedFilter, setAcceptedFilter] = useState<TileFilter>('off');
+  const [remainingFilter, setRemainingFilter] = useState<TileFilter>('off');
+  const [varianceOnly, setVarianceOnly] = useState(false);
+  const [uncountedOnly, setUncountedOnly] = useState(false);
   const [storeFilter, setStoreFilter] = useState<'all' | '001' | '002'>('all');
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<SortField>('part_number');
@@ -179,13 +183,22 @@ function ReconcilePageInner() {
     [results]
   );
 
-  // Filter by tab + store + search + zero/zero (all client-side)
+  // Filter by tile filters + toggles + store + search + zero/zero (all client-side)
   const filtered = results.filter(r => {
-    // Tab filter
-    if (filter === 'flagged' && !r.recount_flagged) return false;
-    if (filter === 'variance' && (r.variance_qty === 0 || r.variance_qty === null)) return false;
-    if (filter === 'uncounted' && r.count1_qty !== null) return false;
-    if (filter === 'accepted' && r.deviation_accepted !== true) return false;
+    // Tile filters (composable, not mutually exclusive)
+    if (flaggedFilter === 'include' && !r.recount_flagged) return false;
+    if (flaggedFilter === 'exclude' && r.recount_flagged) return false;
+    if (acceptedFilter === 'include' && r.deviation_accepted !== true) return false;
+    if (acceptedFilter === 'exclude' && r.deviation_accepted === true) return false;
+    if (remainingFilter !== 'off') {
+      const isZeroZero = r.pastel_qty === 0 && (r.count1_qty === null || r.count1_qty === 0);
+      const isRemaining = !isZeroZero && !r.deviation_accepted;
+      if (remainingFilter === 'include' && !isRemaining) return false;
+      if (remainingFilter === 'exclude' && isRemaining) return false;
+    }
+    // Toggle filters
+    if (varianceOnly && (r.variance_qty === 0 || r.variance_qty === null)) return false;
+    if (uncountedOnly && r.count1_qty !== null) return false;
     // Store filter
     if (storeFilter !== 'all' && r.store_code !== storeFilter) return false;
     // Zero/zero filter
@@ -234,7 +247,19 @@ function ReconcilePageInner() {
   const flaggedParts = results.filter(r => r.recount_flagged).length;
   const uncountedParts = results.filter(r => r.count1_qty === null).length;
   const acceptedParts = results.filter(r => r.deviation_accepted === true).length;
+  const remainingCount = useMemo(() =>
+    results.filter(r => {
+      const isZeroZero = r.pastel_qty === 0 && (r.count1_qty === null || r.count1_qty === 0);
+      return !isZeroZero && !r.deviation_accepted;
+    }).length,
+    [results]
+  );
   const anyHasCount2 = results.some(r => r.count2_qty !== null);
+
+  // 3-way tile filter cycle: off → include → exclude → off
+  const cycleTileFilter = useCallback((setter: React.Dispatch<React.SetStateAction<TileFilter>>) => {
+    setter(prev => prev === 'off' ? 'include' : prev === 'include' ? 'exclude' : 'off');
+  }, []);
 
   // Overall deviation: sum(abs(variance)) / sum(counted qty) across all counted items
   const deviationStats = useMemo(() => {
@@ -744,39 +769,48 @@ function ReconcilePageInner() {
                   )}
                 </div>
 
-                {/* Secondary counts */}
+                {/* Secondary counts — clickable 3-way filters */}
                 <div className="lg:w-[44%] lg:flex-shrink-0 border-t lg:border-t-0 lg:border-l grid grid-cols-4" style={{ borderColor: 'var(--card-border)' }}>
-                  <StatTile label="Total" value={totalParts} />
-                  <StatTile label="Flagged" value={flaggedParts} color={flaggedParts > 0 ? '#f59e0b' : undefined} />
-                  <StatTile label="Accepted" value={acceptedParts} color={acceptedParts > 0 ? '#10b981' : undefined} />
-                  {(() => {
-                    const rem = results.filter(r => {
-                      const isZeroZero = r.pastel_qty === 0 && (r.count1_qty === null || r.count1_qty === 0);
-                      return !isZeroZero && !r.deviation_accepted;
-                    }).length;
-                    return <StatTile label="Remaining" value={rem} color={rem === 0 ? '#10b981' : undefined} />;
-                  })()}
+                  <FilterTile label="Total" value={totalParts} />
+                  <FilterTile label="Flagged" value={flaggedParts}
+                    color={flaggedParts > 0 ? '#f59e0b' : undefined}
+                    filterState={flaggedFilter} onCycleFilter={() => cycleTileFilter(setFlaggedFilter)} />
+                  <FilterTile label="Accepted" value={acceptedParts}
+                    color={acceptedParts > 0 ? '#10b981' : undefined}
+                    filterState={acceptedFilter} onCycleFilter={() => cycleTileFilter(setAcceptedFilter)} />
+                  <FilterTile label="Remaining" value={remainingCount}
+                    color={remainingCount === 0 ? '#10b981' : undefined}
+                    filterState={remainingFilter} onCycleFilter={() => cycleTileFilter(setRemainingFilter)} />
                 </div>
               </div>
             </div>
 
             {/* Filters + Search */}
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-1 bg-white rounded-lg border p-1" style={{ borderColor: 'var(--card-border)' }}>
-                <Filter size={14} className="text-[var(--muted)] ml-2" />
-                {(['all', 'flagged', 'variance', 'uncounted', 'accepted'] as FilterType[]).map(f => (
-                  <button
-                    key={f}
-                    onClick={() => setFilter(f)}
-                    className="px-3 py-1.5 rounded-md text-xs font-medium transition-all capitalize"
-                    style={{
-                      background: filter === f ? 'var(--primary-light)' : 'transparent',
-                      color: filter === f ? 'var(--primary)' : 'var(--muted)',
-                    }}
-                  >
-                    {f}
-                  </button>
-                ))}
+              {/* Toggle pills for non-tile filters */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setVarianceOnly(prev => !prev)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all"
+                  style={{
+                    borderColor: varianceOnly ? 'var(--primary)' : 'var(--card-border)',
+                    background: varianceOnly ? 'var(--primary-light)' : 'transparent',
+                    color: varianceOnly ? 'var(--primary)' : 'var(--muted)',
+                  }}
+                >
+                  Variance
+                </button>
+                <button
+                  onClick={() => setUncountedOnly(prev => !prev)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all"
+                  style={{
+                    borderColor: uncountedOnly ? 'var(--primary)' : 'var(--card-border)',
+                    background: uncountedOnly ? 'var(--primary-light)' : 'transparent',
+                    color: uncountedOnly ? 'var(--primary)' : 'var(--muted)',
+                  }}
+                >
+                  Uncounted
+                </button>
               </div>
               <div className="flex items-center gap-1 bg-white rounded-lg border p-1" style={{ borderColor: 'var(--card-border)' }}>
                 {(['all', '001', '002'] as const).map(s => (
@@ -1000,41 +1034,77 @@ function DeviationTile({ label, percent, primary, secondary }: {
   );
 }
 
-function StatTile({ label, value, color }: { label: string; value: number; color?: string }) {
+function FilterTile({ label, value, color, filterState, onCycleFilter }: {
+  label: string; value: number; color?: string;
+  filterState?: TileFilter; onCycleFilter?: () => void;
+}) {
+  const isClickable = !!onCycleFilter;
+  const isInclude = filterState === 'include';
+  const isExclude = filterState === 'exclude';
+  const activeColor = color || 'var(--primary)';
+
   return (
-    <div className="px-2 py-6 flex flex-col items-center justify-center gap-1.5 border-l first:border-l-0" style={{ borderColor: 'var(--card-border)' }}>
-      <div className="text-[9px] font-semibold uppercase" style={{ color: 'var(--muted)', letterSpacing: '0.12em' }}>
-        {label}
+    <div
+      onClick={onCycleFilter}
+      className={`relative px-2 py-6 flex flex-col items-center justify-center gap-1.5 border-l first:border-l-0 transition-all duration-200 ${isClickable ? 'cursor-pointer select-none group' : ''}`}
+      style={{
+        borderColor: 'var(--card-border)',
+        background: isInclude
+          ? (typeof activeColor === 'string' && activeColor.startsWith('#')
+              ? `${activeColor}0a` : 'rgba(37,99,235,0.04)')
+          : isExclude ? 'rgba(239,68,68,0.03)' : 'transparent',
+      }}
+      title={isClickable ? (
+        isInclude ? `Showing ${label.toLowerCase()} only — click to exclude`
+        : isExclude ? `Hiding ${label.toLowerCase()} — click to clear filter`
+        : `Click to filter by ${label.toLowerCase()}`
+      ) : undefined}
+    >
+      {/* Bottom accent bar — slides in on filter activation */}
+      <div
+        className="absolute bottom-0 left-2 right-2 rounded-t-full transition-all duration-300"
+        style={{
+          height: (isInclude || isExclude) ? 3 : 0,
+          background: isInclude ? activeColor : '#ef4444',
+          opacity: (isInclude || isExclude) ? 1 : 0,
+        }}
+      />
+
+      {/* Hover hint for clickable tiles */}
+      {isClickable && filterState === 'off' && (
+        <div className="absolute bottom-0 left-3 right-3 h-[2px] rounded-t-full bg-slate-200 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+      )}
+
+      {/* Label with filter state indicator */}
+      <div className="flex items-center gap-1">
+        <span className="text-[9px] font-semibold uppercase transition-colors duration-200" style={{
+          color: isInclude ? activeColor : isExclude ? '#ef4444' : 'var(--muted)',
+          letterSpacing: '0.12em',
+        }}>
+          {label}
+        </span>
+        {isInclude && <Check size={9} style={{ color: activeColor }} strokeWidth={3} />}
+        {isExclude && <X size={9} className="text-red-400" strokeWidth={3} />}
       </div>
-      <div className="text-[26px] font-bold tabular-nums leading-none" style={{
+
+      {/* Number with strikethrough on exclude */}
+      <div className="relative text-[26px] font-bold tabular-nums leading-none transition-all duration-200" style={{
         fontFamily: 'var(--font-display)',
-        color: color || 'var(--foreground)',
+        color: isExclude ? 'var(--muted-light)' : (color || 'var(--foreground)'),
         letterSpacing: '-0.02em',
+        opacity: isExclude ? 0.35 : 1,
       }}>
         {value.toLocaleString()}
+        {isExclude && (
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full h-[2px] bg-red-300/70 rounded-full" />
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function StatPill({ label, value, color }: { label: string; value: number; color?: string }) {
-  const colorMap: Record<string, string> = {
-    amber: 'var(--warning)',
-    red: 'var(--error)',
-    green: '#22c55e',
-  };
-  return (
-    <div className="card px-4 py-3">
-      <div className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider">{label}</div>
-      <div className="text-xl font-bold mt-0.5" style={{
-        fontFamily: 'var(--font-display)',
-        color: color ? colorMap[color] : 'var(--foreground)',
-      }}>
-        {value}
-      </div>
-    </div>
-  );
-}
 
 function SortHeader({ label, field, current, dir, onSort, align, rowSpan }: {
   label: string; field: SortField; current: SortField; dir: SortDir;
